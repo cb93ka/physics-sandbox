@@ -1,0 +1,407 @@
+# Сборка Physics: Linux x86_64 (каждый push в main и PR) и iOS arm64
+# (только вручную и по тегу v* — минуты macOS-раннера дорогие).
+# Подробности и список secrets — docs/BUILD.md.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      ios:
+        description: "Собрать iOS"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Тег-сборки (релизы) не отменяем.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_RELEASE: "4.7.2-stable"
+  # Имя каталога шаблонов: <версия>.stable
+  GODOT_TEMPLATES_DIR_NAME: "4.7.2.stable"
+  GODOT_DL: https://github.com/godotengine/godot/releases/download/4.7.2-stable
+  PYTHON_VERSION: "3.12"
+  SCONS_VERSION: "4.11.1"
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SCONS_CACHE: ${{ github.workspace }}/.scons-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Установить scons
+        run: python -m pip install "scons==${SCONS_VERSION}"
+
+      - name: Ключ кэша godot-cpp
+        id: cppkey
+        run: echo "sha=$(git rev-parse HEAD:gdextension/godot-cpp)" >> "$GITHUB_OUTPUT"
+
+      - name: Кэш scons (godot-cpp + ядро)
+        uses: actions/cache@v4
+        with:
+          path: .scons-cache
+          key: scons-linux-x86_64-release-${{ steps.cppkey.outputs.sha }}-${{ hashFiles('gdextension/src/**', 'gdextension/SConstruct') }}
+          restore-keys: |
+            scons-linux-x86_64-release-${{ steps.cppkey.outputs.sha }}-
+
+      - name: Собрать GDExtension (template_release)
+        working-directory: gdextension
+        run: scons platform=linux target=template_release arch=x86_64 -j"$(nproc)"
+
+      - name: Проверить выход сборки
+        run: |
+          ls -la bin/ bin/linux/
+          test -f bin/physics.gdextension
+          test -f bin/linux/libphysics.linux.template_release.x86_64.so
+
+      - name: Кэш Godot и шаблонов
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates/${{ env.GODOT_TEMPLATES_DIR_NAME }}
+          key: godot-${{ env.GODOT_RELEASE }}-linux-x86_64
+
+      - name: Скачать Godot и шаблоны
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/godot /tmp/godot-dl
+          cd /tmp/godot-dl
+          curl -fsSL -o SHA512-SUMS.txt "$GODOT_DL/SHA512-SUMS.txt"
+          curl -fsSL -O "$GODOT_DL/Godot_v${GODOT_RELEASE}_linux.x86_64.zip"
+          curl -fsSL -O "$GODOT_DL/Godot_v${GODOT_RELEASE}_export_templates.tpz"
+          grep -E " (Godot_v${GODOT_RELEASE}_linux.x86_64.zip|Godot_v${GODOT_RELEASE}_export_templates.tpz)$" SHA512-SUMS.txt | sha512sum -c -
+          unzip -q "Godot_v${GODOT_RELEASE}_linux.x86_64.zip" -d ~/godot
+          mv ~/godot/"Godot_v${GODOT_RELEASE}_linux.x86_64" ~/godot/godot
+          chmod +x ~/godot/godot
+          T=~/.local/share/godot/export_templates/${GODOT_TEMPLATES_DIR_NAME}
+          mkdir -p "$T"
+          unzip -q -j "Godot_v${GODOT_RELEASE}_export_templates.tpz" \
+            templates/version.txt templates/linux_release.x86_64 templates/linux_debug.x86_64 -d "$T"
+          rm -rf /tmp/godot-dl
+
+      - name: Godot в PATH
+        run: |
+          echo "$HOME/godot" >> "$GITHUB_PATH"
+          ~/godot/godot --version
+
+      - name: Импорт ресурсов
+        run: godot --headless --import
+
+      - name: Экспорт Linux
+        run: |
+          mkdir -p build/linux
+          godot --headless --export-release "Linux" build/linux/Physics.x86_64
+          chmod +x build/linux/Physics.x86_64
+          ls -la build/linux
+
+      - name: Упаковать
+        id: pack
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then V="$GITHUB_REF_NAME"; else V="$(git rev-parse --short HEAD)"; fi
+          NAME="Physics-${V}-linux-x86_64.tar.gz"
+          tar -czf "$NAME" -C build/linux .
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: physics-linux-x86_64
+          path: ${{ steps.pack.outputs.name }}
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS arm64
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.ios)
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      SCONS_CACHE: ${{ github.workspace }}/.scons-cache
+      # Пустые, если secrets не заданы, — тогда собирается неподписанная .ipa.
+      IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+      IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+      IOS_PROVISION_BASE64: ${{ secrets.IOS_PROVISION_BASE64 }}
+      IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+      # development | ad-hoc (variable репозитория, по умолчанию development)
+      IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD || 'development' }}
+      # Должен совпадать с application/bundle_identifier пресета «iOS».
+      IOS_BUNDLE_ID: io.github.cb93ka.physics
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Установить scons
+        run: python -m pip install "scons==${SCONS_VERSION}"
+
+      - name: Xcode
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Режим подписи
+        id: mode
+        run: |
+          if [[ -n "$IOS_P12_BASE64" && -n "$IOS_PROVISION_BASE64" && -n "$IOS_TEAM_ID" ]]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Подписанная сборка (${IOS_EXPORT_METHOD})"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "Secrets подписи не заданы — неподписанная .ipa для sideload"
+          fi
+
+      - name: Ключ кэша godot-cpp
+        id: cppkey
+        run: echo "sha=$(git rev-parse HEAD:gdextension/godot-cpp)" >> "$GITHUB_OUTPUT"
+
+      - name: Кэш scons (godot-cpp + ядро)
+        uses: actions/cache@v4
+        with:
+          path: .scons-cache
+          key: scons-ios-arm64-release-${{ steps.cppkey.outputs.sha }}-${{ hashFiles('gdextension/src/**', 'gdextension/SConstruct') }}
+          restore-keys: |
+            scons-ios-arm64-release-${{ steps.cppkey.outputs.sha }}-
+
+      - name: Собрать GDExtension (iOS arm64, template_release)
+        working-directory: gdextension
+        run: scons platform=ios target=template_release arch=arm64 -j"$(sysctl -n hw.ncpu)"
+
+      - name: Проверить выход сборки
+        run: |
+          ls -la bin/ bin/ios/
+          test -f bin/physics.gdextension
+          test -d bin/ios/libphysics.ios.template_release.xcframework
+
+      - name: Кэш Godot и шаблонов
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_TEMPLATES_DIR_NAME }}
+          key: godot-${{ env.GODOT_RELEASE }}-macos-ios
+
+      - name: Скачать Godot и шаблоны
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/godot "$RUNNER_TEMP/godot-dl"
+          cd "$RUNNER_TEMP/godot-dl"
+          curl -fsSL -o SHA512-SUMS.txt "$GODOT_DL/SHA512-SUMS.txt"
+          curl -fsSL -O "$GODOT_DL/Godot_v${GODOT_RELEASE}_macos.universal.zip"
+          curl -fsSL -O "$GODOT_DL/Godot_v${GODOT_RELEASE}_export_templates.tpz"
+          grep -E " (Godot_v${GODOT_RELEASE}_macos.universal.zip|Godot_v${GODOT_RELEASE}_export_templates.tpz)$" SHA512-SUMS.txt | shasum -a 512 -c -
+          ditto -x -k "Godot_v${GODOT_RELEASE}_macos.universal.zip" ~/godot
+          T="$HOME/Library/Application Support/Godot/export_templates/${GODOT_TEMPLATES_DIR_NAME}"
+          mkdir -p "$T"
+          unzip -q -j "Godot_v${GODOT_RELEASE}_export_templates.tpz" \
+            templates/version.txt templates/ios.zip -d "$T"
+          rm -rf "$RUNNER_TEMP/godot-dl"
+
+      - name: Godot в PATH
+        run: |
+          mkdir -p ~/bin
+          ln -sf ~/godot/Godot.app/Contents/MacOS/Godot ~/bin/godot
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          ~/bin/godot --version
+
+      - name: Подставить Team ID в пресет iOS
+        env:
+          # Без подписи Godot всё равно требует непустой Team ID; при
+          # CODE_SIGNING_ALLOWED=NO он ни на что не влияет.
+          TEAM: ${{ steps.mode.outputs.signed == 'true' && secrets.IOS_TEAM_ID || 'UNSIGNED00' }}
+        run: |
+          perl -pi -e 's/^application\/app_store_team_id=.*$/application\/app_store_team_id="$ENV{TEAM}"/' export_presets.cfg
+          grep -q "^application/app_store_team_id=\"${TEAM}\"" export_presets.cfg
+
+      - name: Импорт ресурсов
+        run: godot --headless --import
+
+      - name: Экспорт Xcode-проекта
+        run: |
+          mkdir -p build/ios
+          godot --headless --export-release "iOS" build/ios/Physics.ipa
+          test -d build/ios/Physics.xcodeproj
+          ls -la build/ios
+
+      - name: Установить сертификат и профиль
+        if: steps.mode.outputs.signed == 'true'
+        id: sign
+        run: |
+          set -euo pipefail
+          KC="$RUNNER_TEMP/build.keychain-db"
+          KC_PASS="$(uuidgen)"
+          echo "$IOS_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          echo "$IOS_PROVISION_BASE64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+
+          security create-keychain -p "$KC_PASS" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KC_PASS" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -P "$IOS_P12_PASSWORD" -A -t cert -f pkcs12 -k "$KC"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASS" "$KC" >/dev/null
+          OLD_KCS=()
+          while IFS= read -r line; do OLD_KCS+=("$(echo "$line" | tr -d '"' | xargs)"); done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$KC" "${OLD_KCS[@]}"
+
+          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
+          PNAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
+          for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$d"
+            cp "$RUNNER_TEMP/profile.mobileprovision" "$d/$UUID.mobileprovision"
+          done
+
+          IDENTITY=$(security find-identity -v -p codesigning "$KC" | sed -n 's/.*"\(.*\)".*/\1/p' | head -n1)
+          test -n "$IDENTITY"
+          echo "Профиль: $PNAME ($UUID), сертификат: $IDENTITY"
+          {
+            echo "keychain=$KC"
+            echo "profile_name=$PNAME"
+            echo "identity=$IDENTITY"
+          } >> "$GITHUB_OUTPUT"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: xcodebuild archive (подписанный)
+        if: steps.mode.outputs.signed == 'true'
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project build/ios/Physics.xcodeproj -scheme Physics \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath build/ios/Physics.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
+            CODE_SIGN_IDENTITY="${{ steps.sign.outputs.identity }}" \
+            PROVISIONING_PROFILE_SPECIFIER="${{ steps.sign.outputs.profile_name }}" \
+            OTHER_CODE_SIGN_FLAGS="--keychain ${{ steps.sign.outputs.keychain }}" \
+            | tee build/ios/xcodebuild-archive.log | grep -E '^(\*\*|error:|warning: .*sign)' || true
+          test -d build/ios/Physics.xcarchive
+
+      - name: exportArchive → .ipa (подписанная)
+        if: steps.mode.outputs.signed == 'true'
+        run: |
+          set -euo pipefail
+          cat > build/ios/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>${IOS_EXPORT_METHOD}</string>
+            <key>teamID</key><string>${IOS_TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>${{ steps.sign.outputs.identity }}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${IOS_BUNDLE_ID}</key><string>${{ steps.sign.outputs.profile_name }}</string>
+            </dict>
+            <key>compileBitcode</key><false/>
+            <key>stripSwiftSymbols</key><true/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/ios/Physics.xcarchive \
+            -exportOptionsPlist build/ios/ExportOptions.plist \
+            -exportPath build/ios/export
+          mkdir -p build/ios/out
+          mv build/ios/export/*.ipa build/ios/out/Physics.ipa
+
+      - name: xcodebuild archive (без подписи)
+        if: steps.mode.outputs.signed != 'true'
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project build/ios/Physics.xcodeproj -scheme Physics \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath build/ios/Physics.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+            | tee build/ios/xcodebuild-archive.log | grep -E '^(\*\*|error:)' || true
+          test -d build/ios/Physics.xcarchive/Products/Applications
+
+      - name: Payload → .ipa (без подписи)
+        if: steps.mode.outputs.signed != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios/ipa/Payload build/ios/out
+          cp -R build/ios/Physics.xcarchive/Products/Applications/*.app build/ios/ipa/Payload/
+          (cd build/ios/ipa && zip -qry ../out/Physics.ipa Payload)
+
+      - name: Имя артефакта
+        id: pack
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then V="$GITHUB_REF_NAME"; else V="$(git rev-parse --short HEAD)"; fi
+          SUFFIX=$([[ "${{ steps.mode.outputs.signed }}" == "true" ]] && echo "$IOS_EXPORT_METHOD" || echo "unsigned")
+          NAME="Physics-${V}-ios-${SUFFIX}.ipa"
+          mv build/ios/out/Physics.ipa "build/ios/out/$NAME"
+          echo "name=build/ios/out/$NAME" >> "$GITHUB_OUTPUT"
+          ls -la build/ios/out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: physics-ios
+          path: ${{ steps.pack.outputs.name }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Лог xcodebuild при ошибке
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcodebuild-log
+          path: build/ios/xcodebuild-archive.log
+          if-no-files-found: ignore
+
+      - name: Удалить временный keychain
+        if: always() && steps.sign.outputs.keychain != ''
+        run: security delete-keychain "${{ steps.sign.outputs.keychain }}" || true
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, ios]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: physics-*
+          path: dist
+          merge-multiple: true
+
+      - run: ls -la dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

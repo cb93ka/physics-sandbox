@@ -1,0 +1,16 @@
+.godot/
+.import/
+*.import.bak
+export_credentials.cfg
+.godot/export_credentials.cfg
+build/
+*.os
+*.o
+*.obj
+.sconsign*.dblite
+bin/*/
+!bin/.gitkeep
+gdextension/godot-cpp/bin/
+gdextension/godot-cpp/gen/
+.DS_Store
+.claude/settings.local.json

@@ -1,0 +1,14 @@
+[configuration]
+
+entry_symbol = "physics_library_init"
+compatibility_minimum = "4.5"
+reloadable = true
+
+[libraries]
+
+macos.debug = "res://bin/macos/libphysics.macos.template_debug.framework"
+macos.release = "res://bin/macos/libphysics.macos.template_release.framework"
+linux.debug.x86_64 = "res://bin/linux/libphysics.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "res://bin/linux/libphysics.linux.template_release.x86_64.so"
+ios.debug = "res://bin/ios/libphysics.ios.template_debug.xcframework"
+ios.release = "res://bin/ios/libphysics.ios.template_release.xcframework"

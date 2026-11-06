@@ -1,0 +1,100 @@
+#!/usr/bin/env python
+# Build of the "physics" GDExtension (class SandWorld).
+#
+#   cd gdextension
+#   scons platform=macos target=template_release
+#   scons platform=linux target=template_release      (arch=x86_64 by default on x86_64 hosts)
+#   scons platform=ios   target=template_release      (arm64 device; also wraps an .xcframework)
+#
+# Outputs go to ../bin/<platform>/ (see README.md for exact names).
+
+import os
+import subprocess
+
+# API level 4.5: works in Godot 4.5, 4.6, 4.7 (forward compatible).
+env = SConscript("godot-cpp/SConstruct", {"api_version": "4.5"})
+
+env.Append(CPPPATH=["src/"])
+sources = Glob("src/*.cpp")
+
+platform = env["platform"]
+target = env["target"]
+lib = "libphysics"
+bin_dir = "../bin/" + platform
+
+# Treat our own warnings seriously (godot-cpp itself is built with its own flags).
+if env.get("is_msvc", False):
+    env.Append(CXXFLAGS=["/W3"])
+else:
+    env.Append(CXXFLAGS=["-Wall", "-Wextra", "-Wno-unused-parameter"])
+    if target == "template_release":
+        env.Append(CCFLAGS=["-fno-math-errno"])
+
+if platform == "macos":
+    name = "{}.macos.{}".format(lib, target)
+    library = env.SharedLibrary("{}/{}.framework/{}".format(bin_dir, name, name), source=sources)
+    # Minimal Info.plist so the bundle is a well-formed framework.
+    plist = env.Command(
+        "{}/{}.framework/Resources/Info.plist".format(bin_dir, name),
+        [],
+        Action(
+            lambda target, source, env: open(str(target[0]), "w").write(
+                """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key><string>%s</string>
+	<key>CFBundleIdentifier</key><string>org.physics.%s</string>
+	<key>CFBundleName</key><string>%s</string>
+	<key>CFBundlePackageType</key><string>FMWK</string>
+	<key>CFBundleShortVersionString</key><string>0.1</string>
+	<key>CFBundleVersion</key><string>0.1</string>
+	<key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
+</dict>
+</plist>
+"""
+                % (name, name.replace("_", "-"), name)
+            )
+            and None,
+            "Writing Info.plist",
+        ),
+    )
+    Default(library, plist)
+
+elif platform == "ios":
+    # Dynamic library per slice; Godot's iOS exporter turns dylibs inside an
+    # .xcframework into embedded frameworks (same approach as godot-cpp-template).
+    sim = env.get("ios_simulator", False)
+    suffix = ".simulator" if sim else ""
+    dylib = env.SharedLibrary("{}/{}.ios.{}{}.dylib".format(bin_dir, lib, target, suffix), source=sources)
+    Default(dylib)
+
+    xcf = "{}/{}.ios.{}.xcframework".format(bin_dir, lib, target)
+    device = "{}/{}.ios.{}.dylib".format(bin_dir, lib, target)
+    simulator = "{}/{}.ios.{}.simulator.dylib".format(bin_dir, lib, target)
+
+    def make_xcframework(target, source, env):
+        import shutil
+
+        out = xcf
+        if os.path.exists(out):
+            shutil.rmtree(out)
+        cmd = ["xcodebuild", "-create-xcframework"]
+        for p in (device, simulator):
+            if os.path.exists(p):
+                cmd += ["-library", p]
+        cmd += ["-output", out]
+        print(" ".join(cmd))
+        return subprocess.call(cmd)
+
+    # Re-packed after every iOS build (device or simulator); set xcframework=no to skip.
+    if ARGUMENTS.get("xcframework", "yes") != "no":
+        pack = env.Command(xcf + "/Info.plist", dylib, Action(make_xcframework, "Packing $TARGET"))
+        env.AlwaysBuild(pack)
+        Default(pack)
+
+else:
+    library = env.SharedLibrary(
+        "{}/{}{}{}".format(bin_dir, lib, env["suffix"], env["SHLIBSUFFIX"]), source=sources
+    )
+    Default(library)
