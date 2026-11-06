@@ -176,7 +176,10 @@ jobs:
 
       - name: Каталог шаблонов
         id: tpl
-        run: echo "dir=$(cygpath -u "$APPDATA")/Godot/export_templates/${GODOT_TEMPLATES_DIR_NAME}" >> "$GITHUB_OUTPUT"
+        # dir — для bash, dirw (C:/...) — для actions/cache, который не понимает пути вида /c/...
+        run: |
+          echo "dir=$(cygpath -u "$APPDATA")/Godot/export_templates/${GODOT_TEMPLATES_DIR_NAME}" >> "$GITHUB_OUTPUT"
+          echo "dirw=$(cygpath -m "$APPDATA")/Godot/export_templates/${GODOT_TEMPLATES_DIR_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Кэш Godot и шаблонов
         id: godot-cache
@@ -184,8 +187,8 @@ jobs:
         with:
           path: |
             ~/godot
-            ${{ steps.tpl.outputs.dir }}
-          key: godot-${{ env.GODOT_RELEASE }}-windows-x86_64-v2
+            ${{ steps.tpl.outputs.dirw }}
+          key: godot-${{ env.GODOT_RELEASE }}-windows-x86_64-v3
 
       - name: Скачать Godot и шаблоны
         if: steps.godot-cache.outputs.cache-hit != 'true'

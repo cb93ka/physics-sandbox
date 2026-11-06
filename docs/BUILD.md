@@ -109,11 +109,11 @@ PCK встроен в исполняемый файл (`binary_format/embed_pck=
 
 Файл `.github/workflows/build.yml`.
 
-| Событие | Linux | iOS | Release |
-|---|---|---|---|
-| push в `main`, pull request | да | — | — |
-| ручной запуск (Actions → build → Run workflow) | да | да (галочка «Собрать iOS») | — |
-| тег `v*` (`git tag v0.1.0 && git push --tags`) | да | да | да |
+| Событие | Linux | Windows | iOS | Release |
+|---|---|---|---|---|
+| push в `main`, pull request | да | да | — | — |
+| ручной запуск (Actions → build → Run workflow) | да | да | да (галочка «Собрать iOS») | — |
+| тег `v*` (`git tag v0.1.0 && git push --tags`) | да | да | да | да |
 
 Новый push в ту же ветку отменяет старый запуск (тег-сборки не отменяются).
 
@@ -123,7 +123,13 @@ platform=linux target=template_release arch=x86_64` → Godot 4.7.2 + шабло
 `--export-release "Linux"` → артефакт `Physics-<версия>-linux-x86_64.tar.gz` (tar сохраняет
 бит исполнения).
 
-**Джоба ios** (macos-15, до 75 мин): scons `platform=ios arch=arm64 template_release` →
+**Джоба windows** (windows-2025, до 45 мин): scons `platform=windows target=template_release`
+(MSVC) → Godot 4.7.2 win64 + шаблоны Windows в `%APPDATA%\Godot\export_templates` →
+`--export-release "Windows"` → `Physics-<версия>-windows-x86_64.zip` (Physics.exe с встроенным pck
+и `libphysics…dll` рядом). Консольную обёртку Godot переименовывать нельзя, её вызывает скрипт
+`~/godot/godot`.
+
+**Джоба ios** (macos-15 с Xcode 26, до 75 мин; шаблоны Godot 4.7 требуют SDK iOS 26): scons `platform=ios arch=arm64 template_release` →
 xcframework → Godot для macOS + `ios.zip` из шаблонов → подстановка Team ID в пресет →
 экспорт Xcode-проекта `build/ios/Physics.xcodeproj` → `xcodebuild archive` → `.ipa`.
 
@@ -131,7 +137,7 @@ xcframework → Godot для macOS + `ios.zip` из шаблонов → под�
 - Нет secrets → неподписанная `Physics-<версия>-ios-unsigned.ipa` (`CODE_SIGNING_ALLOWED=NO`,
   `.app` упакован в `Payload/`) для AltStore / SideStore / Sideloadly.
 
-**Джоба release** (только тег `v*`): GitHub Release с обоими файлами и автозаметками; тег с
+**Джоба release** (только тег `v*`): GitHub Release со всеми тремя файлами и автозаметками; тег с
 дефисом (`v0.1.0-rc1`) публикуется как pre-release.
 
 **Кэш.** Объекты scons (godot-cpp и ядро) кэшируются через `SCONS_CACHE` (его поддерживает
