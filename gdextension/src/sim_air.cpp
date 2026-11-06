@@ -210,7 +210,7 @@ void World::air_step() {
 	for (int i = 0; i < n; i++) {
 		if (asolid[i]) continue;
 		const float T = atemp[i];
-		const float b = AIR_BUOY * (T - tref) / (T + 273.15f) * dt;
+		const float b = AIR_BUOY * (T - tref) / std::max(T + 273.15f, 1.0f) * dt;
 		au[i] += upx * ul * b;
 		av[i] += upy * ul * b;
 	}

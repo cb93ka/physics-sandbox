@@ -16,6 +16,7 @@ static const int RY[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
 static const float CONV_LIQ = 150.0f;
 static const float CONV_GAS = 8.0f;
 static const float CONV_AIR = 25.0f;
+static const float MELT_INTERFACE_BOOST = 2.0f;
 
 static inline int ring(int d) { return d & 7; }
 
@@ -47,6 +48,11 @@ void World::finalize_materials() {
 			float h = (ka + kb) > 0 ? 2.0f * ka * kb / (ka + kb) : 0.0f;
 			// flux = k * area * dT / dx = k * dx * dT   (area dx^2, distance dx)
 			F_raw[a * 256 + b] = h * cell_size;
+			// A solid next to its own melt (ice-water, wax-molten wax): the meltwater boundary layer
+			// convects, which one cell of still liquid cannot represent; boost that interface.
+			const Material &A = mats[a], &B = mats[b];
+			const bool own_melt = (A.melt.has && A.melt.into == b && B.state == ST_LIQUID) || (B.melt.has && B.melt.into == a && A.state == ST_LIQUID);
+			if (own_melt) F_raw[a * 256 + b] *= MELT_INTERFACE_BOOST;
 		}
 	}
 	rx_table.assign(256 * 256, 0);
@@ -102,6 +108,8 @@ void World::setup(int w, int h) {
 	neutrons.reserve(MAX_NEUTRONS);
 	active_list.reserve(chunks.size());
 	stiff_list.reserve((size_t)W * H);
+	stiff_q.reserve((size_t)W * H);
+	T0buf.assign((size_t)W * H, ambient);
 	recount();
 	air_setup();
 	memset(fission_ring, 0, sizeof(fission_ring));
@@ -192,6 +200,7 @@ void World::swap_cells(int i, int j) {
 void World::paint_circle(int cx, int cy, int r, int m, int mode) {
 	if (m < 0 || m >= (int)mats.size() || W == 0) return;
 	if (r < 0) r = 0;
+	if (r > 4096) r = 4096; // r*r must not overflow
 	const Material &M = mats[m];
 	float t0 = std::isnan(M.initial_temp) ? ambient : M.initial_temp;
 	int rr = r * r + r;
@@ -230,6 +239,7 @@ void World::paint_line(int ax, int ay, int bx, int by, int r, int m, int mode) {
 void World::erase_circle(int cx, int cy, int r) {
 	if (W == 0) return;
 	if (r < 0) r = 0;
+	if (r > 4096) r = 4096; // r*r must not overflow
 	int rr = r * r + r;
 	for (int dy = -r; dy <= r; dy++) {
 		int y = cy + dy;
@@ -248,6 +258,7 @@ void World::erase_circle(int cx, int cy, int r) {
 void World::heat_circle(int cx, int cy, int r, float watts, float delta) {
 	if (W == 0) return;
 	if (r < 0) r = 0;
+	if (r > 4096) r = 4096; // r*r must not overflow
 	int rr = r * r + r;
 	float e = watts * delta * heat_multiplier;
 	for (int dy = -r; dy <= r; dy++) {
@@ -269,6 +280,7 @@ void World::heat_circle(int cx, int cy, int r, float watts, float delta) {
 void World::spawn_neutrons(int cx, int cy, int r, int count) {
 	if (W == 0) return;
 	if (r < 0) r = 0;
+	if (r > 4096) r = 4096; // r*r must not overflow
 	for (int k = 0; k < count && (int)neutrons.size() < MAX_NEUTRONS; k++) {
 		float a = frand() * 6.2831853f, d = std::sqrt(frand()) * (float)r;
 		float x = cx + 0.5f + std::cos(a) * d, y = cy + 0.5f + std::sin(a) * d;
@@ -393,7 +405,10 @@ void World::update_cell(int x, int y) {
 	if (clock[i] == stamp) return;
 	const int m = mat[i];
 	const Material &M = mats[m];
-	if (M.state == ST_SOLID) return;
+	if (M.state == ST_SOLID) {
+		if (M.flags & MF_MOVSOLID) update_movsolid(i, x, y);
+		return;
+	}
 	if (M.flags & MF_LIFE) {
 		life[i] -= FIXED_DT;
 		if (life[i] <= 0.0f) {
@@ -534,6 +549,43 @@ void World::update_liquid(int i, int x, int y) {
 		swap_cells(i, flat);
 		wake_soft(x, y);
 		wake_soft(fxp, fyp);
+	}
+}
+
+// movable_solid: a rigid cell that falls straight down (no diagonal slides, no spreading),
+// sinks in lighter liquids and floats up in denser ones (ice and wood in water).
+void World::update_movsolid(int i, int x, int y) {
+	const int d = grav_dir;
+	const int nx = x + RX[d], ny = y + RY[d];
+	if (inb(nx, ny)) {
+		const int j = ny * W + nx;
+		const State st = mats[mat[j]].state;
+		if (gas_like(st)) {
+			swap_cells(i, j);
+			wake(x, y);
+			wake(nx, ny);
+			return;
+		}
+		if (st == ST_LIQUID && dens(i) > dens(j)) {
+			wake(x, y);
+			if (frand() < 0.5f) {
+				swap_cells(i, j);
+				wake(nx, ny);
+			}
+			return;
+		}
+	}
+	const int u = ring(d + 4);
+	const int ux = x + RX[u], uy = y + RY[u];
+	if (inb(ux, uy)) {
+		const int j = uy * W + ux;
+		if (mats[mat[j]].state == ST_LIQUID && dens(j) > dens(i)) {
+			wake(x, y);
+			if (frand() < 0.5f) {
+				swap_cells(i, j);
+				wake(ux, uy);
+			}
+		}
 	}
 }
 
@@ -679,6 +731,12 @@ void World::explode(int cx, int cy, int radius, float energy_j, int into) {
 		const float w = 1.0f - d / (R + 0.5f);
 		int i = y * W + x;
 		const Material &M = mats[mat[i]];
+		// explosives inside the blast are set off (chain detonation), never deleted
+		if (M.flags & MF_EXPLOSIVE) {
+			if (temp[i] < M.exp_temp) temp[i] = M.exp_temp;
+			wake(x, y);
+			continue;
+		}
 		// destruction of brittle solids near the centre
 		if (M.state == ST_SOLID && !(M.flags & (MF_METAL | MF_FIXED)) && d < R * 0.5f && frand() < w) {
 			set_cell(i, 0, temp[i]);
@@ -707,7 +765,7 @@ void World::explode(int cx, int cy, int radius, float energy_j, int into) {
 		float ic = inv_C[mat[i]];
 		if (ic > 0.0f) {
 			float dT = std::min(share * ic, 2500.0f);
-			temp[i] = std::min(temp[i] + dT, MAX_TEMP);
+			temp[i] = std::min(temp[i] + dT, std::max(temp[i], 3000.0f)); // detonation products ~3000 °C
 		}
 		const int ci = y * W + x;
 		if (mat[ci] == 0 && d < R * 0.6f && fire_id > 0 && frand() < 0.6f) {
@@ -884,8 +942,11 @@ void World::special_pass() {
 				if (R.into_a >= 0) set_cell(ia, R.into_a, ta);
 				if (R.into_b >= 0) set_cell(ib, R.into_b, tb);
 				if (R.heat != 0.0f) {
-					add_heat(ia, 0.5f * R.heat * heat_multiplier);
-					add_heat(ib, 0.5f * R.heat * heat_multiplier);
+					// split in proportion to heat capacity: both cells get the same temperature change
+					const float ca = mats[mat[ia]].cell_C, cb = mats[mat[ib]].cell_C;
+					const float q = R.heat * heat_multiplier / std::max(ca + cb, 1e-12f);
+					add_heat(ia, q * ca);
+					add_heat(ib, q * cb);
 				}
 				wake(x, y);
 				wake(nx, ny);
@@ -976,6 +1037,11 @@ void World::heat_pass() {
 	const float *IC = inv_C.data();
 	const float amb = ambient;
 	stiff_list.clear();
+	// Jacobi: every flux uses the temperatures at the start of the pass, so heat spreads the same
+	// way in all directions (in-place Gauss-Seidel made +x/+y about 8 % faster).
+	if (T0buf.size() != temp.size()) T0buf.resize(temp.size());
+	std::copy(temp.begin(), temp.end(), T0buf.begin());
+	const float *T0 = T0buf.data();
 	// ---- pass A: non-stiff pairs, full step; collect stiff pairs ----
 	for (int c : active_list) {
 		const int cx = c % CW, cy = c / CW;
@@ -995,7 +1061,7 @@ void World::heat_pass() {
 					const int mb = Mt[i + 1];
 					const float f = Fa[mb];
 					if (f >= 0.0f) {
-						const float q = f * (T[i + 1] - Ta);
+						const float q = f * (T0[i + 1] - T0[i]);
 						Ta += q * ica;
 						T[i + 1] -= q * IC[mb];
 					} else {
@@ -1006,7 +1072,7 @@ void World::heat_pass() {
 					const int mb = Mt[i + W];
 					const float f = Fa[mb];
 					if (f >= 0.0f) {
-						const float q = f * (T[i + W] - Ta);
+						const float q = f * (T0[i + W] - T0[i]);
 						Ta += q * ica;
 						T[i + W] -= q * IC[mb];
 					} else {
@@ -1035,15 +1101,22 @@ void World::heat_pass() {
 	// ---- pass B: stiff pairs, nsub substeps ----
 	const int *sl = stiff_list.data();
 	const size_t ns = stiff_list.size();
+	if (stiff_q.size() < ns) stiff_q.resize(ns); // grows once, then reused
+	float *sq = stiff_q.data();
 	for (int s = 0; s < nsub && ns; s++) {
+		// Jacobi within the substep: all fluxes first, then apply
 		for (size_t k = 0; k < ns; k++) {
 			const int code = sl[k];
 			const int i = code >> 1;
 			const int j = (code & 1) ? i + W : i + 1;
-			const int ma = Mt[i], mb = Mt[j];
-			const float q = Fs[ma * 256 + mb] * (T[j] - T[i]);
-			T[i] += q * IC[ma];
-			T[j] -= q * IC[mb];
+			sq[k] = Fs[Mt[i] * 256 + Mt[j]] * (T[j] - T[i]);
+		}
+		for (size_t k = 0; k < ns; k++) {
+			const int code = sl[k];
+			const int i = code >> 1;
+			const int j = (code & 1) ? i + W : i + 1;
+			T[i] += sq[k] * IC[Mt[i]];
+			T[j] -= sq[k] * IC[Mt[j]];
 		}
 	}
 

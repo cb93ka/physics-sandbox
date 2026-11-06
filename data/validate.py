@@ -22,7 +22,7 @@ MAT_KEYS = {
     "melt", "freeze", "boil", "condense", "ignite", "explosive", "acid", "acid_resistance",
     "nuclear", "fixed_temp", "hidden", "desc",
     # v0.1.1
-    "wind_coupling", "gas_alpha", "fan", "emit", "drain",
+    "wind_coupling", "gas_alpha", "fan", "emit", "drain", "movable_solid",
 }
 REQUIRED = {"id": str, "name": str, "category": str, "state": str,
             "density": (int, float), "conductivity": (int, float), "heat_capacity": (int, float),
@@ -222,6 +222,15 @@ def check_materials(doc):
         for key in ("fan", "emit", "drain"):
             if key in mt and st != "solid":
                 err(f"{mid}: {key} допустим только у solid")
+        if "movable_solid" in mt:
+            if not isinstance(mt["movable_solid"], bool):
+                err(f"{mid}: movable_solid должен быть bool")
+            elif mt["movable_solid"]:
+                if st != "solid":
+                    err(f"{mid}: movable_solid допустим только у solid")
+                for k in ("fixed_temp", "fan", "emit", "drain"):
+                    if k in mt:
+                        err(f"{mid}: movable_solid несовместим с {k} (это постройка)")
         if sum(k in mt for k in ("fan", "emit", "drain")) > 1:
             warn(f"{mid}: у материала сразу несколько из fan/emit/drain")
 

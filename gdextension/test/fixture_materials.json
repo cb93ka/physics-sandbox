@@ -134,7 +134,8 @@
     "temp": 0,
     "into": "water",
     "latent": 334000
-   }
+   },
+   "movable_solid": true
   },
   {
    "id": "stone",
@@ -202,7 +203,8 @@
     "residue": "ash",
     "residue_chance": 0.4,
     "heat": 15000000.0
-   }
+   },
+   "movable_solid": true
   },
   {
    "id": "fire",

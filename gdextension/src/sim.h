@@ -32,6 +32,7 @@ enum : uint32_t {
 	MF_EMIT = 1u << 10, // source: emits a material into neighbouring air
 	MF_DRAIN = 1u << 11, // sink: deletes neighbouring non-solid cells
 	MF_FAN = 1u << 12, // blows the air field
+	MF_MOVSOLID = 1u << 13, // movable_solid: falls straight down, floats in denser liquids
 };
 constexpr uint32_t MF_SPECIAL = MF_IGNITE | MF_EXPLOSIVE | MF_ACID | MF_NUC_SOURCE | MF_REACT | MF_EMIT | MF_DRAIN;
 
@@ -225,6 +226,7 @@ private:
 	std::vector<float> F_eff; // full-step conductance*dt (J/K), clamped; -1 = stiff pair
 	std::vector<float> F_sub; // per-substep conductance*dt for stiff pairs
 	std::vector<int> stiff_list; // cell*2 + (0 right, 1 down)
+	std::vector<float> stiff_q, T0buf; // Jacobi scratch
 	std::vector<float> inv_C; // per material
 	std::vector<uint8_t> present;
 	std::vector<int> active_list;
@@ -270,6 +272,7 @@ private:
 	void update_liquid(int i, int x, int y);
 	void update_gas(int i, int x, int y);
 	void update_air(int i, int x, int y);
+	void update_movsolid(int i, int x, int y);
 
 	// specials
 	void explode(int cx, int cy, int radius, float energy_j, int into);

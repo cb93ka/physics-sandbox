@@ -185,7 +185,7 @@ jobs:
           path: |
             ~/godot
             ${{ steps.tpl.outputs.dir }}
-          key: godot-${{ env.GODOT_RELEASE }}-windows-x86_64
+          key: godot-${{ env.GODOT_RELEASE }}-windows-x86_64-v2
 
       - name: Скачать Godot и шаблоны
         if: steps.godot-cache.outputs.cache-hit != 'true'
@@ -203,11 +203,9 @@ jobs:
           python - "$Z" "Godot_v${GODOT_RELEASE}_export_templates.tpz" "$(cygpath -w "$HOME/godot")" "$(cygpath -w "$TPL_DIR")" <<'PY'
           import sys, zipfile, os, shutil
           z, tpz, gdir, tdir = sys.argv[1:]
+          # Консольную обёртку нельзя переименовывать: она ищет рядом exe со своим именем без _console.
           with zipfile.ZipFile(z) as f:
-              for n in f.namelist():
-                  if n.endswith("_console.exe"):
-                      with f.open(n) as s, open(os.path.join(gdir, "godot.exe"), "wb") as d:
-                          shutil.copyfileobj(s, d)
+              f.extractall(gdir)
           want = {"templates/version.txt", "templates/windows_release_x86_64.exe",
                   "templates/windows_release_x86_64_console.exe", "templates/windows_debug_x86_64.exe"}
           with zipfile.ZipFile(tpz) as f:
@@ -216,12 +214,14 @@ jobs:
                       shutil.copyfileobj(s, d)
           PY
           rm -rf /tmp/godot-dl
+          printf '#!/usr/bin/env bash\nexec "$HOME/godot/Godot_v%s_win64_console.exe" "$@"\n' "$GODOT_RELEASE" > ~/godot/godot
+          chmod +x ~/godot/godot
           ls -la ~/godot "$TPL_DIR"
 
       - name: Godot в PATH
         run: |
           echo "$HOME/godot" >> "$GITHUB_PATH"
-          ~/godot/godot.exe --version
+          ~/godot/godot --version
 
       - name: Импорт ресурсов
         run: godot --headless --import

@@ -614,6 +614,7 @@
         "heat": 16000000.0
       },
       "acid_resistance": 0.5,
+      "movable_solid": true,
       "desc": "Сухая древесина воспламеняется около 300 °C и даёт 16 МДж/кг."
     },
     {
@@ -661,6 +662,7 @@
         "heat": 32000000.0
       },
       "acid_resistance": 0.8,
+      "movable_solid": true,
       "desc": "Резина горит коптящим пламенем, выделяя густой чёрный дым."
     },
     {
@@ -681,6 +683,7 @@
         "heat": 43000000.0
       },
       "acid_resistance": 0.9,
+      "movable_solid": true,
       "desc": "Полиэтилен: по теплоте сгорания (43 МДж/кг) равен нефти."
     },
     {
@@ -695,6 +698,7 @@
       "colors": ["#a8d8f0", "#b8e2f5", "#98cde8"],
       "melt": {"temp": 0, "into": "water", "latent": 334000},
       "nuclear": {"moderate": 0.28, "absorb": 0.009},
+      "movable_solid": true,
       "desc": "Лёд легче воды на 8 %, поэтому плавает; на таяние уходит 334 кДж/кг."
     },
     {
@@ -706,10 +710,10 @@
       "conductivity": 50,
       "heat_capacity": 490,
       "colors": ["#8d939b", "#99a0a8", "#80868e"],
-      "melt": {"temp": 1500, "into": "molten_steel", "latent": 270000},
+      "melt": {"temp": 1538, "into": "molten_steel", "latent": 270000},
       "acid_resistance": 0.3,
       "nuclear": {"absorb": 0.15, "reflect": 0.05},
-      "desc": "Углеродистая сталь плавится около 1500 °C, проводит тепло в 80 раз лучше воды."
+      "desc": "Сталь плавится около 1538 °C (как чистое железо), проводит тепло в 80 раз лучше воды."
     },
     {
       "id": "molten_steel",
@@ -724,7 +728,7 @@
       "colors": ["#ffd25a", "#ffc23a", "#ffe08a"],
       "glow": true,
       "viscosity": 0.3,
-      "freeze": {"temp": 1500, "into": "steel", "latent": 270000},
+      "freeze": {"temp": 1538, "into": "steel", "latent": 270000},
       "acid_resistance": 0.3,
       "nuclear": {"absorb": 0.15},
       "desc": "Расплав стали светится жёлто-белым, около 1550 °C."
@@ -895,6 +899,7 @@
       "melt": {"temp": 97.8, "into": "liquid_sodium", "latent": 113000},
       "acid_resistance": 0.0,
       "nuclear": {"absorb": 0.005, "moderate": 0.01},
+      "movable_solid": true,
       "desc": "Натрий мягкий, как воск, плавится при 98 °C и бурно реагирует с водой."
     },
     {
@@ -924,6 +929,7 @@
       "heat_capacity": 757,
       "colors": ["#c9c4d8", "#d4cfe2", "#bdb8cd"],
       "acid_resistance": 0.0,
+      "movable_solid": true,
       "desc": "Калий активнее натрия: с водой загорается фиолетовым пламенем."
     },
     {
@@ -1256,6 +1262,7 @@
       "heat_capacity": 1130,
       "colors": ["#c23a2a", "#d04432", "#b03224"],
       "explosive": {"temp": 300, "radius": 10, "energy": 4184000.0, "into": "smoke"},
+      "movable_solid": true,
       "desc": "Тротил — эталон взрывчатки: 4,184 МДж/кг, «тротиловый эквивалент»."
     },
     {
@@ -1268,6 +1275,7 @@
       "heat_capacity": 1100,
       "colors": ["#d8d0b0", "#e2dabd", "#cec6a4"],
       "explosive": {"temp": 230, "radius": 12, "energy": 5900000.0, "into": "smoke"},
+      "movable_solid": true,
       "desc": "Пластичная взрывчатка C-4 на основе гексогена в 1,3 раза мощнее тротила."
     },
     {
@@ -1488,6 +1496,7 @@
       },
       "acid_resistance": 1.0,
       "nuclear": {"moderate": 0.3, "reflect": 0.2, "absorb": 0.003},
+      "movable_solid": true,
       "desc": "Алмаз проводит тепло в 5 раз лучше меди, а выше 700 °C на воздухе сгорает в CO₂."
     },
     {
@@ -1534,6 +1543,7 @@
       "melt": {"temp": 29.8, "into": "liquid_gallium", "latent": 80100},
       "acid_resistance": 0.5,
       "nuclear": {"absorb": 0.14},
+      "movable_solid": true,
       "desc": "Галлий плавится при 29,8 °C — тает в руке."
     },
     {
@@ -1586,6 +1596,7 @@
       "colors": ["#cfdcf0", "#dbe5f5", "#c2d1e9"],
       "melt": {"temp": 1200, "into": "molten_glass", "latent": 140000},
       "acid_resistance": 0.6,
+      "movable_solid": true,
       "desc": "Кварцевый аэрогель на 95 % состоит из воздуха и держит тепло лучше воздуха (0,015 Вт/(м·К))."
     },
     {
@@ -1599,6 +1610,7 @@
       "initial_temp": -80.0,
       "colors": ["#e8eef2", "#dde6ec", "#f2f6f8"],
       "melt": {"temp": -78.5, "into": "co2", "latent": 571000},
+      "movable_solid": true,
       "desc": "Сухой лёд при −78,5 °C сразу переходит в газ, минуя жидкость."
     },
     {
@@ -1621,6 +1633,7 @@
       },
       "acid_resistance": 0.9,
       "nuclear": {"moderate": 0.35, "absorb": 0.01},
+      "movable_solid": true,
       "desc": "Парафин плавится при 60 °C; богат водородом и замедляет нейтроны — им Чедвик открыл нейтрон."
     },
     {
@@ -1711,6 +1724,7 @@
         "residue_chance": 0.6,
         "heat": 24100000.0
       },
+      "movable_solid": true,
       "desc": "Белый фосфор самовоспламеняется на воздухе около 34 °C, поэтому его хранят под водой."
     },
     {
@@ -1725,6 +1739,7 @@
       "melt": {"temp": 180.5, "into": "liquid_lithium", "latent": 432000},
       "acid_resistance": 0.0,
       "nuclear": {"absorb": 0.9},
+      "movable_solid": true,
       "desc": "Литий — самый лёгкий металл, плавает даже на масле и спокойно шипит в воде."
     },
     {
@@ -1756,6 +1771,7 @@
       "melt": {"temp": 28.5, "into": "liquid_cesium", "latent": 15700},
       "acid_resistance": 0.0,
       "nuclear": {"absorb": 0.2},
+      "movable_solid": true,
       "desc": "Цезий плавится при 28,5 °C и взрывается в воде, реагирует даже со льдом при −116 °C."
     },
     {

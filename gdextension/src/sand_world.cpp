@@ -307,6 +307,9 @@ bool SandWorld::load_materials(const Dictionary &data) {
 			if (M.state != sim::ST_SOLID) P.fail(ctx + ": fixed_temp materials must be 'solid'");
 		}
 		if (M.category == "metal") M.flags |= sim::MF_METAL;
+		if (d.has("movable_solid") && (bool)d["movable_solid"]) {
+			if (M.state == sim::ST_SOLID) M.flags |= sim::MF_MOVSOLID; // ignored for other states
+		}
 
 		// v0.1.1
 		M.wind_coupling = std::min(1.0f, std::max(0.0f, (float)P.num(d, "wind_coupling", gaslike && k != 0 ? 1.0 : 0.0, ctx)));
@@ -698,6 +701,10 @@ bool SandWorld::load_bytes(const PackedByteArray &data) {
 	}
 	uint32_t W = rd.u32(), H = rd.u32();
 	float amb = rd.f32();
+	if (!std::isfinite(amb) || amb < sim::MIN_TEMP || amb > sim::MAX_TEMP) {
+		UtilityFunctions::push_error("SandWorld.load_bytes: bad ambient temperature");
+		return false;
+	}
 	uint8_t gd = rd.u8();
 	if (W == 0 || H == 0 || (uint64_t)W * H > 16ull * 1024 * 1024) {
 		UtilityFunctions::push_error("SandWorld.load_bytes: bad size");
@@ -735,6 +742,7 @@ bool SandWorld::load_bytes(const PackedByteArray &data) {
 	for (size_t i = 0; i < n; i++) {
 		float &t = w.temp[i];
 		if (!std::isfinite(t)) t = amb;
+		t = std::min(std::max(t, sim::MIN_TEMP), sim::MAX_TEMP);
 		if (!std::isfinite(w.phase[i])) w.phase[i] = 0;
 		if (!std::isfinite(w.life[i])) w.life[i] = 0;
 		const sim::Material &M = w.mats[w.mat[i]];
@@ -749,7 +757,13 @@ bool SandWorld::load_bytes(const PackedByteArray &data) {
 		nt.vy = rd.f32();
 		nt.age = rd.f32();
 		nt.fast = rd.u8();
-		if (rd.ok && w.inb((int)nt.x, (int)nt.y)) w.neutrons.push_back(nt);
+		if (!rd.ok || !std::isfinite(nt.x) || !std::isfinite(nt.y) || !std::isfinite(nt.vx) || !std::isfinite(nt.vy) || !std::isfinite(nt.age)) continue;
+		if (nt.x < 0 || nt.y < 0 || !w.inb((int)nt.x, (int)nt.y)) continue;
+		float l = std::sqrt(nt.vx * nt.vx + nt.vy * nt.vy);
+		if (l < 1e-6f) continue;
+		nt.vx /= l;
+		nt.vy /= l;
+		w.neutrons.push_back(nt);
 	}
 	if (ver >= 2 && rd.ok) {
 		uint32_t aw = rd.u32(), ah = rd.u32();

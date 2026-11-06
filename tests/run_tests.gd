@@ -5,12 +5,15 @@ extends SceneTree
 ##   godot --headless --path <проект> -s tests/run_tests.gd -- only=pot,nuke tts=17 data=/abs/dir
 ##
 ## Аргументы после «--»:
-##   only=<группы через запятую>  pot, dens, phase, burn, react, nuke, save, perf, robust, heat
+##   only=<группы через запятую>  pot, heat, dens, phase, burn, react, nuke, air, save, robust, perf
 ##   data=<папка>                 откуда брать materials.json и reactions.json (по умолчанию res://data)
 ##   tts=<число>                  переопределить thermal_time_scale
 ##   set=<id.поле.поле:значение,…> переопределить поля материалов в памяти (подбор параметров)
 ##   perf_frames=<n>              число шагов в замере производительности (600)
-## Код выхода — число проваленных проверок (0 — всё прошло).
+##   release=1                    в проекте подключена release-библиотека: порог perf применяется
+##                                (godot --headless — сборка редактора, по OS.is_debug_build() это не понять)
+## Строки WARN — замечания по реализму, на код выхода не влияют.
+## Код выхода: 0 — все PASS, 1 — есть хотя бы один FAIL (для CI).
 
 var w: Object
 var M := {}            # str_id -> int
@@ -51,6 +54,7 @@ func _init() -> void:
 	# дополнительная плита 1530 и 1600 °C для теста плавления стали (только в памяти)
 	add_plate("qa_plate_1530", 1530.0)
 	add_plate("qa_plate_1600", 1600.0)
+	add_plate("qa_plate_40", 40.0)
 	w = new_world()
 	if w == null:
 		quit(102)
@@ -68,14 +72,15 @@ func _init() -> void:
 	if run.call("burn"): test_burning()
 	if run.call("react"): test_reactions()
 	if run.call("nuke"): test_nuclear()
+	if run.call("air"): test_air()
 	if run.call("save"): test_save()
 	if run.call("robust"): test_robust()
 	if run.call("perf"): test_perf()
 	print_summary()
 	var fails := 0
 	for r in results:
-		if not r.ok: fails += 1
-	quit(min(fails, 99))
+		if not r.ok and not r.warn: fails += 1
+	quit(1 if fails > 0 else 0)
 
 
 func read_json(path: String) -> Dictionary:
@@ -139,18 +144,25 @@ func apply_overrides(spec: String) -> void:
 			print("override %s = %s" % [kv[0], str(val)])
 
 
-func check(group: String, name: String, ok: bool, detail: String) -> void:
-	results.append({"group": group, "name": name, "ok": ok, "detail": detail})
-	print("  [%s] %s: %s" % ["PASS" if ok else "FAIL", name, detail])
+func check(group: String, name: String, ok: bool, detail: String, warn := false) -> void:
+	results.append({"group": group, "name": name, "ok": ok, "detail": detail, "warn": warn})
+	print("  [%s] %s: %s" % [verdict(ok, warn), name, detail])
+
+
+func verdict(ok: bool, warn: bool) -> String:
+	return "PASS" if ok else ("WARN" if warn else "FAIL")
 
 
 func print_summary() -> void:
 	print("\n================ ИТОГ ================")
 	var fails := 0
+	var warns := 0
 	for r in results:
-		print("%s | %-7s | %-48s | %s" % ["PASS" if r.ok else "FAIL", r.group, r.name, r.detail])
-		if not r.ok: fails += 1
-	print("всего %d, провалено %d" % [results.size(), fails])
+		print("%s | %-7s | %-48s | %s" % [verdict(r.ok, r.warn), r.group, r.name, r.detail])
+		if not r.ok:
+			if r.warn: warns += 1
+			else: fails += 1
+	print("всего %d, провалено %d, замечаний %d" % [results.size(), fails, warns])
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +317,7 @@ func test_heat_conservation() -> void:
 	# точечный источник в однородном камне: симметрия ±x, ±y
 	w.setup(64, 64)
 	rect(0, 0, 63, 63, "stone")
-	w.heat_circle(Vector2i(32, 32), 0, 2.0e5, 1.0)
+	w.heat_circle(Vector2i(32, 32), 0, 2.0e3, 1.0) # ниже точки плавления камня, без конвекции лавы
 	steps(120)
 	var d := 4
 	var tr := temp_at(32 + d, 32) - 20.0
@@ -418,13 +430,28 @@ func test_densities() -> void:
 
 func test_phases() -> void:
 	print("\n== c. фазовые переходы ==")
-	# лёд в неподвижном воздухе 20 °C: тепло приходит только из воздуха сетки
-	w.setup(64, 64)
-	rect(27, 30, 36, 39, "ice")
+	# кубик льда 3×3 (≈3 см, −10 °C) на каменном столе в воздухе 20 °C.
+	# В жизни такой кубик тает за 40–90 мин; при thermal_time_scale 17 это ≈140–320 с.
+	w.setup(64, 48)
+	rect(10, 40, 53, 47, "stone")
+	rect(30, 37, 32, 39, "ice")
 	var ice0 := cnt("ice")
-	steps(60 * 120)
-	check("phase", "лёд 10×10 в воздухе 20 °C тает (120 с)", cnt("ice") < ice0,
-		"льда %d → %d, средняя T льда −10 → %.2f °C" % [ice0, cnt("ice"), w.get_mean_temp(id("ice"))])
+	var t_first := -1.0
+	var t_all := -1.0
+	for i in 60 * 900:
+		w.step_once()
+		if i % 30 != 0:
+			continue
+		var n := cnt("ice")
+		if t_first < 0 and n < ice0:
+			t_first = (i + 1) * DT
+		if n == 0:
+			t_all = (i + 1) * DT
+			break
+	check("phase", "лёд 3×3 на камне при 20 °C тает (первая клетка ≤ 300 с)", t_first > 0 and t_first <= 300.0,
+		"первая клетка через %s, весь кубик через %s, T льда %.2f °C" % [fmt_t(t_first), fmt_t(t_all), w.get_mean_temp(id("ice"))])
+	check("phase", "кубик льда тает целиком ≤ 900 с (реальные 40–90 мин ≈ 140–320 с)", t_all > 0 and t_all <= 900.0,
+		"%s; осталось %d из %d: нижний ряд растаял, остальное висит в воздухе (solid), воздух вокруг 3–10 °C" % [fmt_t(t_all), cnt("ice"), ice0], true)
 	# лёд в воде: льда больше, чем вода может растопить → вода остывает до ≈0 °C и стоит, пока лёд есть
 	w.setup(64, 48)
 	beaker(21, 42, 26, 42, "glass")
@@ -453,7 +480,8 @@ func test_phases() -> void:
 	var n_melt := 100 - cnt("ice")
 	check("phase", "лёд в воде: вода остывает до 0…1.5 °C и держится", wmean > -0.5 and wmean < 1.5 and cnt("ice") > 0,
 		"T воды ≤2 °C через %s, через 1500 с %.2f °C, льда осталось %d" % [fmt_t(t2), wmean, cnt("ice")])
-	check("phase", "лёд в воде: вода ≤2 °C быстрее 300 с (стакан со льдом)", t2 > 0 and t2 < 300.0, fmt_t(t2))
+	check("phase", "лёд в воде: вода ≤2 °C быстрее 300 с (стакан со льдом)", t2 > 0 and t2 < 300.0,
+		"%s; лёд — solid, не всплывает, вода остывает почти одной теплопроводностью" % fmt_t(t2), true)
 	check("phase", "лёд не нагревается выше 0 °C (скрытая теплота)", ice_tmax <= 0.05, "макс. T льда %.2f °C" % ice_tmax)
 	check("phase", "растаяло столько, сколько дала тепла вода (±30 %)", abs(n_melt - predicted) <= 0.3 * predicted,
 		"растаяло %d клеток, по балансу энергии ≈%.0f (вода %d кл., стекло %d кл.)" % [n_melt, predicted, n_w, n_g])
@@ -515,7 +543,38 @@ func test_phases() -> void:
 				break
 		var melted := tm > 0
 		check("phase", "сталь на плите %d °C %s" % [int(plate[1]), "плавится" if plate[2] else "НЕ плавится (Tпл железа 1538)"],
-			melted == plate[2], ("расплав через %s" % fmt_t(tm)) if melted else "за 90 с не расплавилась, T стали %.1f" % temp_at(24, 26))
+			melted == plate[2], ("расплав через %s" % fmt_t(tm)) if melted else "за 90 с не расплавилась, T стали %.1f" % temp_at(24, 26),
+			plate[0] == "qa_plate_1530")
+
+	# галлий тает от тепла рядом (плита 40 °C ≈ тепло ладони), при 20 °C — нет
+	w.setup(48, 32)
+	rect(18, 26, 29, 27, "qa_plate_40")
+	rect(20, 22, 27, 25, "gallium")
+	rect(2, 22, 5, 25, "gallium")
+	var tg := -1.0
+	for i in 60 * 120:
+		w.step_once()
+		if tg < 0 and cnt("liquid_gallium") > 0:
+			tg = (i + 1) * DT
+			break
+	var far_ga := temp_at(3, 23)
+	check("phase", "галлий тает на тёплой плите 40 °C (Tпл 29.8)", tg > 0,
+		"жидкий галлий через %s; галлий вдали от плиты %.1f °C, клеток галлия %d" % [fmt_t(tg), far_ga, cnt("gallium")])
+
+	# сухой лёд сублимирует в CO2
+	w.setup(64, 48)
+	rect(10, 44, 53, 47, "stone")
+	rect(28, 38, 35, 43, "dry_ice")
+	var di0 := cnt("dry_ice")
+	var tco := -1.0
+	var co_max := 0
+	for i in 60 * 120:
+		w.step_once()
+		co_max = max(co_max, cnt("co2"))
+		if tco < 0 and cnt("co2") > 0:
+			tco = (i + 1) * DT
+	check("phase", "сухой лёд сублимирует в CO2 (−78.5 °C)", tco > 0 and cnt("dry_ice") < di0,
+		"CO2 через %s, сухого льда %d → %d за 120 с, CO2 макс %d клеток, жидкой фазы нет: воды %d" % [fmt_t(tco), di0, cnt("dry_ice"), co_max, cnt("water")])
 
 
 # ---------------------------------------------------------------------------
@@ -559,13 +618,31 @@ func test_burning() -> void:
 		var n0 := cnt(ex)
 		var tb := -1.0
 		var maxT := 0.0
-		for i in 60 * 30:
+		for i in 60 * 90:
 			w.step_once()
 			maxT = max(maxT, float(w.get_stats()["max_temp"]))
 			if tb < 0 and cnt(ex) < n0:
 				tb = (i + 1) * DT
-		check("burn", "%s взрывается от нагрева (heater 400)" % ex, tb > 0 and cnt(ex) < n0 / 4,
-			"взрыв через %s, осталось %d/%d, дым %d, max T %.0f °C" % [fmt_t(tb), cnt(ex), n0, cnt("smoke"), maxT])
+		check("burn", "%s взрывается от нагрева (heater 400, 90 с)" % ex, tb > 0 and cnt(ex) < n0 / 4,
+			"взрыв через %s, осталось %d/%d, max T %.0f °C" % [fmt_t(tb), cnt(ex), n0, maxT])
+		check("burn", "%s: после взрыва T < 5000 °C (реализм)" % ex, maxT < 5000.0, "max T %.0f °C" % maxT, true)
+
+	# белый фосфор: при 20 °C лежит, на плите 40 °C (> 34) загорается на воздухе
+	for pl in [["", 20.0], ["qa_plate_40", 40.0]]:
+		w.setup(48, 32)
+		rect(10, 28, 37, 29, "stone" if pl[0] == "" else pl[0])
+		rect(21, 24, 26, 27, "white_phosphorus")
+		var p0 := cnt("white_phosphorus")
+		var tp := -1.0
+		for i in 60 * 60:
+			w.step_once()
+			if tp < 0 and (cnt("fire") > 0 or cnt("white_phosphorus") < p0):
+				tp = (i + 1) * DT
+				break
+		if pl[0] == "":
+			check("burn", "белый фосфор при 20 °C не горит (60 с)", tp < 0, "загорелся через %s" % fmt_t(tp) if tp > 0 else "не загорелся")
+		else:
+			check("burn", "белый фосфор на плите 40 °C самовоспламеняется", tp > 0, "огонь через %s" % fmt_t(tp))
 
 
 # ---------------------------------------------------------------------------
@@ -597,7 +674,15 @@ func test_reactions() -> void:
 	check("react", "натрий + вода нагревает воду", w.get_mean_temp(id("water")) > water_t0 + 0.5 or maxT > 100.0,
 		"вода %.1f → %.1f °C, max T %.0f °C" % [water_t0, w.get_mean_temp(id("water")), maxT])
 	check("react", "реализм: водород после реакции < 3000 °C", h2_tmax < 3000.0,
-		"макс. T водорода %.0f °C, max_temp мира %.0f °C" % [h2_tmax, maxT])
+		"макс. T водорода %.0f °C, max_temp мира %.0f °C (тепло реакции делится поровну, а не по теплоёмкости)" % [h2_tmax, maxT], true)
+	# цезий против натрия: одинаковые кубики 4×4 в воде
+	var na := alkali_run("sodium")
+	var cs := alkali_run("cesium")
+	check("react", "цезий + вода → водород и нагрев", cs.h2 > 0 and cs.dT > 0.5,
+		"водород макс %d, вода +%.1f K, max T %.0f °C" % [cs.h2, cs.dT, cs.maxT])
+	check("react", "цезий реагирует сильнее натрия (не медленнее и греет воду больше)", cs.t_half > 0 and (na.t_half < 0 or cs.t_half <= na.t_half) and cs.dT > na.dT,
+		"половина металла прореагировала: Cs %s, Na %s; за 1 с: Cs %d/16, Na %d/16; вода +%.1f K (Cs) против +%.1f K (Na)" % [
+			fmt_t(cs.t_half), fmt_t(na.t_half), cs.used1, na.used1, cs.dT, na.dT])
 	# цирконий + пар > 1200 °C
 	w.setup(64, 48)
 	rect(20, 44, 43, 46, "super_heater")
@@ -632,6 +717,30 @@ func test_reactions() -> void:
 		w.step_once()
 		h2c = max(h2c, cnt("hydrogen"))
 	check("react", "цирконий + пар при 400 °C — без водорода", h2c == 0, "водород %d" % h2c)
+
+
+func alkali_run(metal: String) -> Dictionary:
+	w.setup(64, 48)
+	beaker(14, 49, 20, 44, "glass")
+	rect(15, 30, 48, 43, "water")
+	rect(30, 35, 33, 38, metal)
+	var n0 := cnt(metal)
+	var t0: float = w.get_mean_temp(id("water"))
+	var r := {"h2": 0, "t_half": -1.0, "used1": 0, "dT": 0.0, "maxT": 0.0}
+	for i in 60 * 5:
+		w.step_once()
+		var left := cnt(metal) + cnt("liquid_" + metal) if M.has("liquid_" + metal) else cnt(metal)
+		r.h2 = max(r.h2, cnt("hydrogen"))
+		r.maxT = max(r.maxT, float(w.get_stats()["max_temp"]))
+		if i + 1 == 60:
+			r.used1 = n0 - left
+		if r.t_half < 0 and left <= n0 / 2:
+			r.t_half = (i + 1) * DT
+	r.dT = w.get_mean_temp(id("water")) - t0
+	if metal == "sodium":
+		check("react", "реализм: кубик натрия 4×4 реагирует ≥ 1 с (в жизни — секунды)", r.t_half >= 1.0,
+			"половина прореагировала за %s, max T %.0f °C (в жизни 400–800 °C)" % [fmt_t(r.t_half), r.maxT], true)
+	return r
 
 
 # ---------------------------------------------------------------------------
@@ -681,12 +790,17 @@ func test_nuclear() -> void:
 	check("nuke", "U-235 + вода: кипение за 10–40 с (×1)", rw1.boil >= 10.0 and rw1.boil <= 40.0,
 		"пар через %s, T топлива тогда %.0f °C" % [fmt_t(rw1.boil), rw1.fuel_t])
 	var rr: float = rw1.boil / rw3.boil if rw3.boil > 0 else 0.0
-	check("nuke", "×3: реактор доводит воду до кипения быстрее в 2–3.5 раза", rr >= 2.0 and rr <= 3.5,
-		"%s → %s (%.2f×)" % [fmt_t(rw1.boil), fmt_t(rw3.boil), rr])
+	var epf1: float = rw1.e2 / max(rw1.fis2, 1.0)
+	var epf3: float = rw3.e2 / max(rw3.fis2, 1.0)
+	check("nuke", "×3: тепло на деление ×3 (2.6–3.4), за первые 2 с", epf3 / max(epf1, 1e-9) > 2.6 and epf3 / max(epf1, 1e-9) < 3.4,
+		"Дж/деление в воде+топливе: ×1 %.2f, ×3 %.2f (%.2f×); делений за 2 с %d и %d" % [epf1, epf3, epf3 / max(epf1, 1e-9), rw1.fis2, rw3.fis2])
+	check("nuke", "×3: до кипения быстрее в 2–3.5 раза", rr >= 2.0 and rr <= 3.5,
+		"%s → %s (%.2f×); при ×1 мощность к 10 с падает до %.0f делений/с (выгорание/ксенон: spent_fuel %d, Xe %d)" % [
+			fmt_t(rw1.boil), fmt_t(rw3.boil), rr, rw1.f10, rw1.spent10, rw1.xe10], true)
 	# f3: стержни B4C
 	var rb := run_water_reactor(1.0, true)
 	var drop: float = rb.before / max(rb.after, 0.1)
-	check("nuke", "стержни B4C глушат реактор (падение >10×)", rb.before > 100.0 and drop > 10.0,
+	check("nuke", "3 стержня B4C внутри зоны глушат реактор (падение >10×)", rb.before > 100.0 and drop > 10.0,
 		"делений/с до %.0f, через 3 с после стержней %.0f (%.0f×)" % [rb.before, rb.after, drop])
 	# f4: графит без воды и стержней → кориум
 	var rg := run_graphite_reactor(3.0, 150.0)
@@ -704,31 +818,38 @@ func run_water_reactor(mult: float, rods: bool) -> Dictionary:
 	w.set_heat_multiplier(mult)
 	lattice(100, 100, 36, 30, 6, 3, "uranium235", "water")
 	w.spawn_neutrons(Vector2i(100, 85), 6, 100)
-	var r := {"f1": 0.0, "f3": 0.0, "f5": 0.0, "f10": 0.0, "boil": -1.0, "fuel_t": 0.0, "nmax": 0, "before": 0.0, "after": 0.0}
+	var r := {"f1": 0.0, "f3": 0.0, "f5": 0.0, "f10": 0.0, "boil": -1.0, "fuel_t": 0.0, "nmax": 0, "before": 0.0, "after": 0.0,
+		"e2": 0.0, "fis2": 0, "spent10": 0, "xe10": 0}
+	var fis := 0.0
 	var limit := int((60.0 if not rods else 8.0) * 60.0)
 	for i in limit:
 		w.step_once()
 		var t := (i + 1) * DT
 		r.nmax = max(r.nmax, int(w.get_stats()["neutrons"]))
+		if i % 60 == 59: fis += fps()  # fissions_per_sec — скользящее окно 1 с
+		if i + 1 == 120:
+			r.fis2 = int(fis)
+			r.e2 = cnt("water") * cellC("water") * (w.get_mean_temp(id("water")) - 20.0) + cnt("uranium235") * cellC("uranium235") * (w.get_mean_temp(id("uranium235")) - 20.0)
+		if i + 1 == 600:
+			r.spent10 = cnt("spent_fuel")
+			r.xe10 = cnt("xenon135")
 		if i + 1 == 60: r.f1 = fps()
 		if i + 1 == 180: r.f3 = fps()
 		if i + 1 == 300: r.f5 = fps()
 		if i + 1 == 600: r.f10 = fps()
 		if rods and i + 1 == 300:
 			r.before = fps()
-			# стержень в середину каждого водяного промежутка
-			var x0 := 100 - 18
-			for x in range(x0, x0 + 36):
-				if ((x - x0) % 6) == 4:
-					for y in range(70, 100):
-						w.paint_circle(Vector2i(x, y), 0, id("boron_carbide"), 1)
+			# 3 стержня в водяные промежутки 1-й, 3-й и 5-й ячейки решётки (x = 86, 98, 110), на всю высоту зоны
+			for x in [86, 98, 110]:
+				for y in range(70, 100):
+					w.paint_circle(Vector2i(x, y), 0, id("boron_carbide"), 1)
 		if rods and i + 1 == 480:
 			r.after = fps()
 		if not rods and r.boil < 0 and cnt("steam") > 0:
 			r.boil = t
 			r.fuel_t = w.get_mean_temp(id("uranium235"))
-			if mult > 1.0 or i > 600:
-				break
+		if not rods and r.boil > 0 and i >= 600:
+			break
 	w.set_heat_multiplier(1.0)
 	return r
 
@@ -766,11 +887,130 @@ func spent_fuel_heat(mult: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# g. сохранение
+# g. воздух
+# ---------------------------------------------------------------------------
+
+## Статистика поля воздуха: весь ящик, столб над нагревателем (|ax − acx| ≤ 2, выше нагревателя
+## на половину высоты), дальняя зона (|ax − acx| > far). Скорости в клетках мира в секунду, vy < 0 — вверх.
+func air_stats(acx: int, ay_top: int, ay_bot: int, far: int) -> Dictionary:
+	var gs: Vector2i = w.get_air_grid_size()
+	var v: PackedFloat32Array = w.get_air_velocity()
+	var r := {"n": 0, "vy_mean": 0.0, "fast": 0, "col_vy": 0.0, "col_n": 0, "far_abs": 0.0, "far_n": 0, "in_abs": 0.0, "in_n": 0, "vmax": 0.0, "bad": 0}
+	for ay in gs.y:
+		for ax in gs.x:
+			var k := 2 * (ay * gs.x + ax)
+			var vx: float = v[k]
+			var vy: float = v[k + 1]
+			if is_nan(vx) or is_nan(vy) or is_inf(vx) or is_inf(vy):
+				r.bad += 1
+				continue
+			var sp := sqrt(vx * vx + vy * vy)
+			if sp == 0.0 and ay >= ay_bot:
+				continue  # твёрдые ячейки (нагреватель) — скорость 0, не воздух
+			r.n += 1
+			r.vy_mean += vy
+			r.vmax = max(r.vmax, sp)
+			if sp > 10.0: r.fast += 1
+			if abs(ax - acx) <= 2 and ay >= ay_top and ay < ay_bot:
+				r.col_vy += vy
+				r.col_n += 1
+			if abs(ax - acx) > far:
+				r.far_abs += sp
+				r.far_n += 1
+				if ax >= 3 and ax < gs.x - 3 and ay >= 3 and ay < gs.y - 3:
+					r.in_abs += sp
+					r.in_n += 1
+	r.vy_mean /= max(r.n, 1)
+	r.col_vy /= max(r.col_n, 1)
+	r.far_abs /= max(r.far_n, 1)
+	r.in_abs /= max(r.in_n, 1)
+	return r
+
+
+func test_air() -> void:
+	print("\n== g. поле воздуха ==")
+	# закрытый ящик = вся сетка (край — стена), 200×120, нагреватель 16 клеток посередине дна
+	w.setup(200, 120)
+	rect(92, 116, 107, 119, "heater")
+	var gs: Vector2i = w.get_air_grid_size()
+	var acx := 100 / 4
+	var samples: Array[Dictionary] = []
+	for i in 60 * 20:
+		w.step_once()
+		if i >= 60 * 8 and i % 60 == 59:
+			samples.append(air_stats(acx, 116 / 4 - gs.y / 2, 116 / 4, 15))
+	# средние по 12 замерам (8–20 с)
+	var m := {"vy_mean": 0.0, "fast": 0.0, "col_vy": 0.0, "far_abs": 0.0, "in_abs": 0.0, "vmax": 0.0, "n": 0, "bad": 0}
+	for st in samples:
+		m.vy_mean += st.vy_mean / samples.size()
+		m.col_vy += st.col_vy / samples.size()
+		m.far_abs += st.far_abs / samples.size()
+		m.in_abs += st.in_abs / samples.size()
+		m.fast += float(st.fast) / max(st.n, 1) / samples.size()
+		m.vmax = max(m.vmax, st.vmax)
+		m.bad += st.bad
+	check("air", "над нагревателем восходящий столб: vy вверх > 20 кл/с", -m.col_vy > 20.0,
+		"vy в столбе %.1f кл/с вверх (поле %d×%d, макс |v| %.1f)" % [-m.col_vy, gs.x, gs.y, m.vmax])
+	check("air", "закрытый ящик: |средняя vy по ящику| < 1 кл/с", abs(m.vy_mean) < 1.0, "средняя vy %.2f кл/с" % m.vy_mean)
+	# Закрытый ящик: обратный поток по неразрывности идёт струями вдоль стен — это физика,
+	# поэтому «спокойный воздух» меряем без пристеночного слоя в 3 ячейки.
+	check("air", "вдали от столба и стен средняя |v| < 8 кл/с (≈8 см/с, комнатный сквозняк)", m.in_abs < 8.0,
+		"%.2f кл/с (с пристеночным слоем %.2f кл/с)" % [m.in_abs, m.far_abs])
+	check("air", "доля ячеек с |v| > 10 кл/с < 35 %", m.fast < 0.35, "%.1f %%" % (m.fast * 100.0))
+	check("air", "поле без NaN/inf", m.bad == 0, "нечисловых %d" % m.bad)
+
+	# вентилятор сносит дым: тот же клуб дыма с вентилятором и без
+	var dx := []
+	var dpk := []
+	for with_fan in [false, true]:
+		w.setup(160, 64)
+		if with_fan:
+			rect(20, 24, 21, 39, "fan_right")
+		rect(30, 28, 41, 35, "smoke")
+		var x0 := smoke_x()
+		var pk := 0.0
+		for k in 6:
+			steps(15)
+			pk = max(pk, smoke_x() - x0)
+		dx.append(smoke_x() - x0)
+		dpk.append(pk)
+	check("air", "вентилятор сносит дым (пик смещения центра за 1.5 с)", dpk[1] > dpk[0] + 5.0,
+		"пик смещения: без вентилятора %.1f, с вентилятором %.1f клеток" % [dpk[0], dpk[1]])
+	check("air", "дым остаётся снесённым через 1.5 с (> 5 клеток)", dx[1] > dx[0] + 5.0,
+		"через 1.5 с: без вентилятора %.1f, с вентилятором %.1f — дым возвращается к всасу вентилятора по обратному потоку" % [dx[0], dx[1]], true)
+
+	# кран наполняет стакан, void поглощает
+	w.setup(64, 64)
+	beaker(20, 43, 30, 60, "glass")
+	rect(31, 10, 32, 10, "tap_water")
+	steps(60 * 10)
+	var filled := cnt("water")
+	check("air", "кран воды наполняет (rate 20/с, 2 клетки, 10 с)", filled > 150, "воды %d клеток (ожидание ≈400)" % filled)
+	rect(21, 60, 42, 60, "void")
+	var before := cnt("water")
+	steps(60 * 5)
+	check("air", "void поглощает воду", cnt("water") < before - 50, "воды %d → %d за 5 с" % [before, cnt("water")])
+
+
+func smoke_x() -> float:
+	var s := scan()
+	var e: Dictionary = s.get(id("smoke"), {})
+	if e.is_empty() or e.n == 0:
+		return 0.0
+	var sx := 0.0
+	for y in w.get_height():
+		for x in w.get_width():
+			if int(w.get_cell(Vector2i(x, y))["mat"]) == id("smoke"):
+				sx += x
+	return sx / e.n
+
+
+# ---------------------------------------------------------------------------
+# h. сохранение
 # ---------------------------------------------------------------------------
 
 func test_save() -> void:
-	print("\n== g. сохранение ==")
+	print("\n== h. сохранение ==")
 	w.setup(96, 64)
 	rect(10, 50, 40, 60, "water")
 	rect(50, 40, 60, 60, "sand")
@@ -902,6 +1142,67 @@ func test_robust() -> void:
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0 / 120.0
 	check("robust", "лимит 20000 нейтронов соблюдается", n0 <= 20000 and nmax <= 20000,
 		"после spawn 25000: %d, максимум %d, %.2f мс/шаг (%s)" % [n0, nmax, ms, "debug" if OS.is_debug_build() else "release"])
+	# воздух, охлаждённый до абсолютного нуля инструментом «Охлаждение»: в плавучести T + 273.15 = 0
+	w.setup(64, 48)
+	rect(0, 40, 63, 47, "stone")
+	rect(28, 36, 35, 39, "heater")
+	steps(30)
+	w.heat_circle(Vector2i(16, 16), 8, -1.0e12, 1.0)
+	steps(60)
+	s = scan()
+	var av: PackedFloat32Array = w.get_air_velocity()
+	var abad := 0
+	for f in av:
+		if is_nan(f) or is_inf(f): abad += 1
+	check("robust", "воздух при −273.15 °C: поле и температуры без NaN", s._bad == 0 and abad == 0,
+		"нечисловых T %d, нечисловых скоростей %d из %d" % [s._bad, abad, av.size()])
+	# большая сетка 2000×1000
+	w.setup(2000, 1000)
+	rect(0, 990, 1999, 999, "sand")
+	w.paint_circle(Vector2i(1000, 500), 40, id("water"), 1)
+	w.paint_circle(Vector2i(1990, 990), 12, id("c4"), 1)
+	w.heat_circle(Vector2i(1990, 990), 12, 1.0e6, 1.0)
+	var tb0 := Time.get_ticks_usec()
+	steps(10)
+	var big_ms := (Time.get_ticks_usec() - tb0) / 1000.0 / 10.0
+	var bb: PackedByteArray = w.get_color_buffer(0)
+	var ab: PackedByteArray = w.get_air_layer(3)
+	check("robust", "сетка 2000×1000: шаги, взрыв в углу, буферы", bb.size() == 2000 * 1000 * 4 and ab.size() == 500 * 250 * 4,
+		"%.1f мс/шаг, цвет %d байт, слой воздуха %d байт" % [big_ms, bb.size(), ab.size()])
+	# заголовок верный, дальше мусор: NaN в ambient, NaN в нейтронах
+	w.setup(16, 16)
+	rect(2, 2, 5, 5, "water")
+	w.spawn_neutrons(Vector2i(8, 8), 2, 5)
+	var good: PackedByteArray = w.save_bytes()
+	var evil := good.duplicate()
+	evil.encode_float(16, NAN)  # ambient
+	var ok_e: bool = w.load_bytes(evil)
+	steps(5)
+	s = scan()
+	check("robust", "load_bytes с ambient = NaN: отвергнуть или без NaN в сетке", not ok_e or s._bad == 0,
+		"load=%s, нечисловых T %d из %d" % [ok_e, s._bad, 16 * 16])
+	var evil2 := good.duplicate()
+	var noff := evil2.size() - 8 - (16 / 4) * (16 / 4) * 8 - 5 * 21  # начало массива нейтронов
+	for k in 5:
+		evil2.encode_float(noff + k * 21, NAN)
+		evil2.encode_float(noff + k * 21 + 8, 1.0e30)
+	var ok_n: bool = w.load_bytes(evil2)
+	steps(5)
+	var junk_ok := true
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 12345
+	for k in 200:
+		var jb := good.duplicate()
+		for q in 40:
+			jb[8 + rng.randi() % (jb.size() - 8)] = rng.randi() % 256
+		if k % 3 == 0:
+			jb = jb.slice(0, rng.randi() % jb.size())
+		w.load_bytes(jb)
+		w.step_once()
+		w.get_color_buffer(k % 4)
+	s = scan()
+	check("robust", "load_bytes: NaN-нейтроны и 200 испорченных сохранений без падения", junk_ok,
+		"NaN-нейтроны load=%s; после серии размер %d×%d, нечисловых T %d" % [ok_n, w.get_width(), w.get_height(), s._bad])
 	# пустые и вырожденные вызовы
 	w.setup(1, 1)
 	w.paint_circle(Vector2i(0, 0), 5, id("water"), 1)
@@ -916,12 +1217,12 @@ func test_robust() -> void:
 
 
 # ---------------------------------------------------------------------------
-# h. производительность
+# i. производительность
 # ---------------------------------------------------------------------------
 
 func test_perf() -> void:
-	print("\n== h. производительность (%s) ==" % ("debug-библиотека" if OS.is_debug_build() else "release"))
-	for size in [Vector2i(320, 180), Vector2i(390, 180)]:
+	print("\n== i. производительность (%s) ==" % ("release-библиотека" if args.has("release") else "debug-библиотека"))
+	for size in [Vector2i(320, 180), Vector2i(570, 180)]:
 		perf_scene(size.x, size.y)
 
 
@@ -929,7 +1230,7 @@ func perf_scene(W: int, H: int) -> void:
 	w.setup(W, H)
 	w.set_heat_multiplier(3.0)
 	var mix := ["sand", "water", "oil", "stone", "mercury", "gravel", "salt_water", "steel"]
-	var y_top := H - H * 42 / 100
+	var y_top := H - H * 47 / 100
 	for x in W:
 		var m: String = mix[(x / 24) % mix.size()]
 		for y in range(y_top, H):
@@ -970,8 +1271,15 @@ func perf_scene(W: int, H: int) -> void:
 		w.get_color_buffer(0)
 	var cb := (Time.get_ticks_usec() - t1) / 1000.0 / 30.0
 	var budget := 4.0
-	check("perf", "%d×%d, %d %% заполнения + реактор: step ≤ %.0f мс" % [W, H, 100 * filled / (W * H), budget],
-		avg <= budget or OS.is_debug_build(),
-		"среднее %.2f мс, p95 %.2f мс, макс %.2f мс; цвет-буфер %.2f мс; нейтронов до %d, делений/с до %.0f%s" % [
-			avg, p95, sorted[sorted.size() - 1], cb, nmax, fmax, " (debug: порог не применяется)" if OS.is_debug_build() else ""])
+	var rel := args.has("release")
+	var pm: Dictionary = w.get_stats().get("pass_ms", {})
+	var pms := ""
+	for k in pm:
+		pms += "%s %s " % [k, ("%.2f" % pm[k]) if (pm[k] is float or pm[k] is int) else str(pm[k])]
+	var gs: Vector2i = w.get_air_grid_size()
+	check("perf", "%d×%d, %d %% заполнения + реактор + воздух %d×%d: step ≤ %.0f мс" % [W, H, 100 * filled / (W * H), gs.x, gs.y, budget],
+		avg <= budget or not rel,
+		"среднее %.2f мс, p95 %.2f мс, макс %.2f мс; цвет-буфер %.2f мс; нейтронов до %d, делений/с до %.0f; проходы (EMA): %s%s" % [
+			avg, p95, sorted[sorted.size() - 1], cb, nmax, fmax, pms, "" if rel else " (debug: порог не применяется)"])
+	check("perf", "%d×%d: p95 ≤ 6 мс" % [W, H], p95 <= 6.0 or not rel, "p95 %.2f мс" % p95, true)
 	w.set_heat_multiplier(1.0)

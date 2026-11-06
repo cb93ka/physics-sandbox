@@ -40,6 +40,8 @@ func _init() -> void:
 	if only == "" or only == "nuke": test_nuclear()
 	if only == "" or only == "save": test_save()
 	if only == "" or only == "misc": test_misc()
+	if only == "" or only == "ice": test_ice()
+	if only == "" or only == "float": test_float()
 	if only == "" or only == "air": test_air()
 	if only == "" or only == "boron": test_boron()
 	if only == "" or only == "perf": test_perf()
@@ -509,3 +511,50 @@ func test_perf_wide() -> void:
 			w.get_air_layer(3)
 		var al := (Time.get_ticks_usec() - t1) / 1000.0 / 30.0
 		print("RESULT perf %dx180: step %.3f ms (air on), %.3f ms (air off) -> air %.3f ms; neutrons %d; color_buffer ms %s; air_layer %.3f ms" % [width, on, off, on - off, st.neutrons, views, al])
+
+
+func test_ice() -> void:
+	print("\n== ice cube 3x3 in water at 20 C (x1) ==")
+	w.setup(120, 60)
+	w.set_heat_multiplier(1.0)
+	for y in range(30, 60):
+		for x in range(40, 80):
+			var m: int = M.stone if (x < 42 or x >= 78 or y >= 58) else M.water
+			w.paint_circle(Vector2i(x, y), 0, m, 1)
+	for y in range(40, 43):
+		for x in range(58, 61):
+			w.paint_circle(Vector2i(x, y), 0, M.ice, 1)
+	var t_first := -1.0
+	var t_all := -1.0
+	for i in 60 * 400:
+		w.step_once()
+		var n: int = w.count_material(M.ice)
+		if t_first < 0 and n < 9: t_first = (i + 1) / 60.0
+		if n == 0:
+			t_all = (i + 1) / 60.0
+			break
+	print("RESULT ice first cell %.1f s, all melted %.1f s, water mean %.1f C" % [t_first, t_all, w.get_mean_temp(M.water)])
+
+func test_float() -> void:
+	print("\n== movable_solid ==")
+	w.setup(120, 80)
+	for y in range(40, 80):
+		for x in range(30, 90):
+			var m: int = M.stone if (x < 32 or x >= 88 or y >= 78) else M.water
+			w.paint_circle(Vector2i(x, y), 0, m, 1)
+	for y in range(72, 75):
+		for x in range(40, 43):
+			w.paint_circle(Vector2i(x, y), 0, M.wood, 1)
+	for y in range(5, 8):
+		for x in range(70, 73):
+			w.paint_circle(Vector2i(x, y), 0, M.ice, 1)
+	for y in range(5, 8):
+		for x in range(60, 63):
+			w.paint_circle(Vector2i(x, y), 0, M.wood, 1)
+	for i in 600:
+		w.step_once()
+	var wood: Dictionary = region_stats(M.wood)
+	var ice: Dictionary = region_stats(M.ice)
+	print("wood (one block from the bottom, one dropped): rows %d..%d, cols %d..%d; ice dropped: rows %d..%d cols %d..%d; water surface row 40" % [wood.miny, wood.maxy, wood.minx, wood.maxx, ice.miny, ice.maxy, ice.minx, ice.maxx])
+	var ok: bool = wood.maxy < 50 and ice.maxy < 50 and ice.maxx - ice.minx == 2
+	print("RESULT movable_solid float ok=%s" % ok)
