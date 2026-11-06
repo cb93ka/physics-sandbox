@@ -136,7 +136,9 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && inputs.ios)
-    runs-on: macos-15
+    # Шаблоны Godot 4.7 для iOS слинкованы с SDK iOS 26 (Metal 4: MTLTensorDomain,
+    # CADynamicRange*), поэтому нужен Xcode 26 — он есть на образе macos-26.
+    runs-on: macos-26
     timeout-minutes: 75
     env:
       SCONS_CACHE: ${{ github.workspace }}/.scons-cache
@@ -163,6 +165,10 @@ jobs:
 
       - name: Xcode
         run: |
+          # Берём самый новый Xcode 26.x на образе.
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then echo "::error::Xcode 26 не найден на раннере"; ls /Applications; exit 1; fi
+          sudo xcode-select -s "$XC/Contents/Developer"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
