@@ -131,14 +131,131 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  windows:
+    name: Windows x86_64
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      SCONS_CACHE: ${{ github.workspace }}/.scons-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Установить scons
+        run: python -m pip install "scons==${SCONS_VERSION}"
+
+      - name: Ключ кэша godot-cpp
+        id: cppkey
+        run: echo "sha=$(git rev-parse HEAD:gdextension/godot-cpp)" >> "$GITHUB_OUTPUT"
+
+      - name: Кэш scons (godot-cpp + ядро)
+        uses: actions/cache@v4
+        with:
+          path: .scons-cache
+          key: scons-windows-x86_64-release-${{ steps.cppkey.outputs.sha }}-${{ hashFiles('gdextension/src/**', 'gdextension/SConstruct') }}
+          restore-keys: |
+            scons-windows-x86_64-release-${{ steps.cppkey.outputs.sha }}-
+
+      # MSVC находится scons автоматически (vswhere на образе windows).
+      - name: Собрать GDExtension (template_release, MSVC)
+        working-directory: gdextension
+        run: scons platform=windows target=template_release arch=x86_64 -j"$NUMBER_OF_PROCESSORS"
+
+      - name: Проверить выход сборки
+        run: |
+          ls -la bin/ bin/windows/
+          test -f bin/windows/libphysics.windows.template_release.x86_64.dll
+
+      - name: Каталог шаблонов
+        id: tpl
+        run: echo "dir=$(cygpath -u "$APPDATA")/Godot/export_templates/${GODOT_TEMPLATES_DIR_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Кэш Godot и шаблонов
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ${{ steps.tpl.outputs.dir }}
+          key: godot-${{ env.GODOT_RELEASE }}-windows-x86_64
+
+      - name: Скачать Godot и шаблоны
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        env:
+          TPL_DIR: ${{ steps.tpl.outputs.dir }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/godot /tmp/godot-dl "$TPL_DIR"
+          cd /tmp/godot-dl
+          Z="Godot_v${GODOT_RELEASE}_win64.exe.zip"
+          curl -fsSL -o SHA512-SUMS.txt "$GODOT_DL/SHA512-SUMS.txt"
+          curl -fsSL -O "$GODOT_DL/$Z"
+          curl -fsSL -O "$GODOT_DL/Godot_v${GODOT_RELEASE}_export_templates.tpz"
+          grep -E " ($Z|Godot_v${GODOT_RELEASE}_export_templates.tpz)$" SHA512-SUMS.txt | sha512sum -c -
+          python - "$Z" "Godot_v${GODOT_RELEASE}_export_templates.tpz" "$HOME/godot" "$TPL_DIR" <<'PY'
+          import sys, zipfile, os, shutil
+          z, tpz, gdir, tdir = sys.argv[1:]
+          with zipfile.ZipFile(z) as f:
+              for n in f.namelist():
+                  if n.endswith("_console.exe"):
+                      with f.open(n) as s, open(os.path.join(gdir, "godot.exe"), "wb") as d:
+                          shutil.copyfileobj(s, d)
+          want = {"templates/version.txt", "templates/windows_release_x86_64.exe",
+                  "templates/windows_release_x86_64_console.exe", "templates/windows_debug_x86_64.exe"}
+          with zipfile.ZipFile(tpz) as f:
+              for n in want:
+                  with f.open(n) as s, open(os.path.join(tdir, os.path.basename(n)), "wb") as d:
+                      shutil.copyfileobj(s, d)
+          PY
+          rm -rf /tmp/godot-dl
+          ls -la ~/godot "$TPL_DIR"
+
+      - name: Godot в PATH
+        run: |
+          echo "$HOME/godot" >> "$GITHUB_PATH"
+          ~/godot/godot.exe --version
+
+      - name: Импорт ресурсов
+        run: godot --headless --import
+
+      - name: Экспорт Windows
+        run: |
+          mkdir -p build/windows
+          godot --headless --export-release "Windows" build/windows/Physics.exe
+          ls -la build/windows
+          test -f build/windows/Physics.exe
+
+      - name: Упаковать
+        id: pack
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then V="$GITHUB_REF_NAME"; else V="$(git rev-parse --short HEAD)"; fi
+          NAME="Physics-${V}-windows-x86_64.zip"
+          (cd build/windows && 7z a -tzip "../../$NAME" . > /dev/null)
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: physics-windows-x86_64
+          path: ${{ steps.pack.outputs.name }}
+          if-no-files-found: error
+          retention-days: 14
+
   ios:
     name: iOS arm64
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && inputs.ios)
     # Шаблоны Godot 4.7 для iOS слинкованы с SDK iOS 26 (Metal 4: MTLTensorDomain,
-    # CADynamicRange*), поэтому нужен Xcode 26 — он есть на образе macos-26.
-    runs-on: macos-26
+    # CADynamicRange*), поэтому нужен Xcode 26 (на образе macos-15 он установлен рядом с 16.x).
+    runs-on: macos-15
     timeout-minutes: 75
     env:
       SCONS_CACHE: ${{ github.workspace }}/.scons-cache
@@ -392,7 +509,7 @@ jobs:
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, ios]
+    needs: [linux, windows, ios]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

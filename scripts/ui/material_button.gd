@@ -18,7 +18,7 @@ var _holding := false
 func setup(e: Dictionary, group: ButtonGroup) -> void:
 	entry = e
 	text = str(e.get("name", "?"))
-	icon = PixelIcons.swatch(e.get("color", Color.MAGENTA), 18)
+	icon = PixelIcons.swatch(e.get("color", Color.MAGENTA), 18, fan_dir(str(e.get("key", ""))))
 	toggle_mode = true
 	button_group = group
 	focus_mode = Control.FOCUS_NONE
@@ -37,9 +37,24 @@ func setup(e: Dictionary, group: ButtonGroup) -> void:
 	button_up.connect(_on_up)
 
 
+## Направление вентилятора по str_id (fan_up/down/left/right), иначе ZERO.
+static func fan_dir(key: String) -> Vector2i:
+	match key:
+		"fan_up": return Vector2i(0, -1)
+		"fan_down": return Vector2i(0, 1)
+		"fan_left": return Vector2i(-1, 0)
+		"fan_right": return Vector2i(1, 0)
+	return Vector2i.ZERO
+
+
 func hint_text() -> String:
 	var d := str(entry.get("desc", ""))
-	return str(entry.get("name", "")) + ("\n" + d if d != "" else "")
+	var t := str(entry.get("name", ""))
+	var fd := fan_dir(str(entry.get("key", "")))
+	if fd != Vector2i.ZERO:
+		var names := {Vector2i(0, -1): "вверх ↑", Vector2i(0, 1): "вниз ↓", Vector2i(-1, 0): "влево ←", Vector2i(1, 0): "вправо →"}
+		t += " — дует " + str(names[fd])
+	return t + ("\n" + d if d != "" else "")
 
 
 func _on_enter() -> void:

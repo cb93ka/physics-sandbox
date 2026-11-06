@@ -8,8 +8,9 @@ signal clear_pressed
 signal saves_pressed
 signal settings_pressed
 
-const VIEW_NAMES: Array[String] = ["Обычный", "Тепло", "Нейтроны"]
-const VIEW_TIPS: Array[String] = ["Обычный вид (1)", "Тепловизор (2)", "Нейтроны и радиация (3)"]
+const VIEW_NAMES: Array[String] = ["Обычный", "Тепло", "Нейтроны", "Воздух"]
+const VIEW_TIPS: Array[String] = ["Обычный вид (1)", "Тепловизор (2)", "Нейтроны и радиация (3)", "Потоки воздуха (4)"]
+const WIDE_SCREEN := 1000.0
 
 var state: AppState
 var _pause: Button
@@ -58,7 +59,15 @@ func setup(app_state: AppState) -> void:
 	var settings := UiKit.icon_button("gear", "Настройки")
 	settings.pressed.connect(func() -> void: settings_pressed.emit())
 	row.add_child(settings)
+	get_viewport().size_changed.connect(_on_resized)
+	_on_resized()
 	sync()
+
+
+## На узком экране кнопка разогрева короче: «×3».
+func _on_resized() -> void:
+	var wide := get_viewport().get_visible_rect().size.x >= WIDE_SCREEN
+	_heat.text = "Разогрев ×3" if wide else "×3"
 
 
 func sync() -> void:

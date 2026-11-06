@@ -21,6 +21,31 @@ var _offset := Vector2.ZERO
 var _area := Rect2()
 var _area_target := Rect2()
 var _has_area := false
+# Слой воздуха (get_air_layer): грубая сетка, линейная фильтрация — гладко.
+var _air_sprite: Sprite2D
+var _air_img: Image
+var _air_tex: ImageTexture
+var _frame: _Frame
+
+
+## Рамка мира в экранных координатах: затемнение снаружи, мягкая тень и тонкий кант.
+class _Frame extends Node2D:
+	var rect := Rect2()
+	var screen := Rect2()
+
+	func _draw() -> void:
+		var r := rect
+		var dim := Color(0.0, 0.0, 0.0, 0.28)
+		# Снаружи мира — чуть темнее.
+		draw_rect(Rect2(screen.position, Vector2(screen.size.x, maxf(0.0, r.position.y - screen.position.y))), dim)
+		draw_rect(Rect2(Vector2(screen.position.x, r.end.y), Vector2(screen.size.x, maxf(0.0, screen.end.y - r.end.y))), dim)
+		draw_rect(Rect2(Vector2(screen.position.x, r.position.y), Vector2(maxf(0.0, r.position.x - screen.position.x), r.size.y)), dim)
+		draw_rect(Rect2(Vector2(r.end.x, r.position.y), Vector2(maxf(0.0, screen.end.x - r.end.x), r.size.y)), dim)
+		# Мягкая тень наружу.
+		for k in 6:
+			var g := float(k + 1) * 2.0
+			draw_rect(r.grow(g), Color(0, 0, 0, 0.10 - 0.015 * float(k)), false, 2.0)
+		draw_rect(r.grow(0.5), Color(0.75, 0.85, 1.0, 0.16), false, 1.0)
 
 
 func setup(world: SimWorld) -> void:
@@ -34,6 +59,17 @@ func setup(world: SimWorld) -> void:
 		_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		add_child(_sprite)
 	_sprite.texture = _tex
+	if _air_sprite == null:
+		_air_sprite = Sprite2D.new()
+		_air_sprite.centered = false
+		_air_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		_air_sprite.visible = false
+		add_child(_air_sprite)
+		move_child(_air_sprite, 0)  # под материалами
+		_frame = _Frame.new()
+		_frame.top_level = true
+		add_child(_frame)
+	_air_img = null
 	if not _has_area:
 		_area = Rect2(Vector2.ZERO, screen_size())
 		_area_target = _area
@@ -75,6 +111,33 @@ func refresh(view_mode: int) -> void:
 		return
 	_img.set_data(w, h, false, Image.FORMAT_RGBA8, buf)
 	_tex.update(_img)
+	_refresh_air(view_mode)
+
+
+func _refresh_air(view_mode: int) -> void:
+	if not sim.has_air_layer or view_mode == 2:
+		_air_sprite.visible = false
+		return
+	var g := sim.get_air_grid_size()
+	var buf := sim.get_air_layer(view_mode)
+	if g.x <= 0 or g.y <= 0 or buf.size() != g.x * g.y * 4:
+		_air_sprite.visible = false
+		return
+	if _air_img == null or _air_img.get_width() != g.x or _air_img.get_height() != g.y:
+		_air_img = Image.create_from_data(g.x, g.y, false, Image.FORMAT_RGBA8, buf)
+		_air_tex = ImageTexture.create_from_image(_air_img)
+		_air_sprite.texture = _air_tex
+		var sc := float(sim.get_air_cell_scale())
+		_air_sprite.scale = Vector2(sc, sc)
+		# Поле может быть чуть шире мира (округление вверх) — обрезаем по краю мира.
+		_air_sprite.region_enabled = true
+		_air_sprite.region_rect = Rect2(Vector2.ZERO, _world_px / sc)
+	else:
+		_air_img.set_data(g.x, g.y, false, Image.FORMAT_RGBA8, buf)
+		_air_tex.update(_air_img)
+	# В виде «Воздух» слой скорости приглушаем, чтобы трассеры читались поверх.
+	_air_sprite.modulate.a = 0.6 if view_mode == 3 else 1.0
+	_air_sprite.visible = true
 
 
 ## Текущий кадр мира как Image (для миниатюр сохранений).
@@ -151,3 +214,7 @@ func _apply() -> void:
 			_offset[axis] = clampf(_offset[axis], a1 - size_px[axis], a0)
 	position = _offset
 	scale = Vector2.ONE * cell_scale()
+	if _frame != null:
+		_frame.rect = Rect2(_offset, size_px)
+		_frame.screen = Rect2(Vector2.ZERO, screen_size())
+		_frame.queue_redraw()

@@ -5,7 +5,7 @@ extends RefCounted
 
 signal changed
 
-enum Tool { BRUSH, ERASER, HEAT, COOL, NEUTRON }
+enum Tool { BRUSH, ERASER, HEAT, COOL, NEUTRON, WIND }
 
 const SETTINGS_PATH := "user://settings.cfg"
 const RECENT_MAX := 6

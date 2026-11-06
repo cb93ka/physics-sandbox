@@ -21,6 +21,8 @@ MAT_KEYS = {
     "thermal_expansion", "initial_temp", "colors", "glow", "viscosity", "lifetime", "decay_into",
     "melt", "freeze", "boil", "condense", "ignite", "explosive", "acid", "acid_resistance",
     "nuclear", "fixed_temp", "hidden", "desc",
+    # v0.1.1
+    "wind_coupling", "gas_alpha", "fan", "emit", "drain",
 }
 REQUIRED = {"id": str, "name": str, "category": str, "state": str,
             "density": (int, float), "conductivity": (int, float), "heat_capacity": (int, float),
@@ -29,13 +31,15 @@ NUC_PROB = ["fissile", "fast_fission", "absorb", "moderate", "reflect", "burnup_
 NUC_KEYS = set(NUC_PROB) | {"spontaneous", "decay_heat", "fission_energy", "neutrons_per_fission",
                             "burnup_into", "poison_into"}
 # Переход: из каких состояний → в какое состояние
+# melt → gas — сублимация (сухой лёд, UF6), condense → solid/powder — обратная десублимация.
 TRANSITIONS = {
-    "melt": ({"solid", "powder"}, {"liquid"}),
+    "melt": ({"solid", "powder"}, {"liquid", "gas"}),
     "freeze": ({"liquid"}, {"solid", "powder"}),
     "boil": ({"liquid"}, {"gas"}),
-    "condense": ({"gas"}, {"liquid"}),
+    "condense": ({"gas"}, {"liquid", "solid", "powder"}),
 }
 INVERSE = {"melt": "freeze", "freeze": "melt", "boil": "condense", "condense": "boil"}
+SUBLIM_INVERSE = {"melt": "condense", "condense": "melt"}
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
 COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -175,6 +179,52 @@ def check_materials(doc):
         if "fixed_temp" in mt and st != "solid":
             err(f"{mid}: fixed_temp допустим только у solid")
 
+        # v0.1.1: воздух, вентиляторы, источники, стоки
+        if "wind_coupling" in mt:
+            if not in01(mt["wind_coupling"]):
+                err(f"{mid}: wind_coupling вне 0..1")
+            if st not in ("gas", "fire", "powder"):
+                warn(f"{mid}: wind_coupling у {st} не используется")
+        if "gas_alpha" in mt:
+            if not in01(mt["gas_alpha"]):
+                err(f"{mid}: gas_alpha вне 0..1")
+            if st not in ("gas", "fire"):
+                warn(f"{mid}: gas_alpha у {st} не используется")
+        if "fan" in mt:
+            f = mt["fan"]
+            if not isinstance(f, dict) or set(f) != {"dir", "strength"}:
+                err(f"{mid}.fan: нужны ровно поля dir, strength")
+            else:
+                d = f["dir"]
+                if not (isinstance(d, list) and len(d) == 2 and all(is_num(x) for x in d)
+                        and any(x != 0 for x in d)):
+                    err(f"{mid}.fan.dir должен быть ненулевым вектором [x, y]")
+                if not is_num(f["strength"]) or f["strength"] <= 0:
+                    err(f"{mid}.fan.strength должно быть > 0")
+        if "emit" in mt:
+            e = mt["emit"]
+            if not isinstance(e, dict) or set(e) != {"into", "rate", "temp"}:
+                err(f"{mid}.emit: нужны ровно поля into, rate, temp")
+            else:
+                if ref(f"{mid}.emit.into", e["into"]):
+                    if by_id[e["into"]].get("state") in ("solid", "empty"):
+                        err(f"{mid}.emit.into: выпускать можно только не-solid и не air")
+                    if e["into"] == mid:
+                        err(f"{mid}.emit.into: источник выпускает сам себя")
+                if not is_num(e["rate"]) or e["rate"] <= 0:
+                    err(f"{mid}.emit.rate должно быть > 0")
+                if e["temp"] is not None and not is_num(e["temp"]):
+                    err(f"{mid}.emit.temp — число или null")
+        if "drain" in mt:
+            dr = mt["drain"]
+            if not isinstance(dr, dict) or set(dr) != {"rate"} or not is_num(dr["rate"]) or dr["rate"] <= 0:
+                err(f"{mid}.drain: нужно поле rate > 0")
+        for key in ("fan", "emit", "drain"):
+            if key in mt and st != "solid":
+                err(f"{mid}: {key} допустим только у solid")
+        if sum(k in mt for k in ("fan", "emit", "drain")) > 1:
+            warn(f"{mid}: у материала сразу несколько из fan/emit/drain")
+
         # Фазовые переходы
         for tr, (src_states, dst_states) in TRANSITIONS.items():
             if tr not in mt:
@@ -197,6 +247,10 @@ def check_materials(doc):
                 if p["into"] == mid:
                     err(f"{mid}.{tr}: переход сам в себя")
                 inv = INVERSE[tr]
+                if (tr == "melt" and tgt.get("state") == "gas") or \
+                        (tr == "condense" and tgt.get("state") in ("solid", "powder")):
+                    inv = SUBLIM_INVERSE[tr]
+                    warn(f"{mid}.{tr} → {p['into']}: сублимация/десублимация, ядро должно разрешать этот переход")
                 back = tgt.get(inv)
                 if isinstance(back, dict) and back.get("into") == mid:
                     if back.get("temp") != p["temp"]:

@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
@@ -17,6 +18,7 @@ class SandWorld : public RefCounted {
 	double accumulator = 0.0;
 	bool materials_ok = false;
 	PackedByteArray color_buf;
+	PackedByteArray air_buf;
 
 protected:
 	static void _bind_methods();
@@ -47,6 +49,14 @@ public:
 	PackedByteArray get_color_buffer(int view);
 	Dictionary get_cell(const Vector2i &p) const;
 	Dictionary get_stats() const;
+
+	// v0.1.1: air field and layers
+	Vector2i get_air_grid_size() const { return Vector2i(w.AW, w.AH); }
+	PackedFloat32Array get_air_velocity() const;
+	int get_air_cell_scale() const { return sim::AIR_SCALE; }
+	void add_air_impulse(const Vector2i &c, int r, const Vector2 &v);
+	void set_air_enabled(bool on) { w.set_air_enabled(on); }
+	PackedByteArray get_air_layer(int view);
 
 	PackedByteArray save_bytes() const;
 	bool load_bytes(const PackedByteArray &data);

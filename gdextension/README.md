@@ -14,8 +14,9 @@ gdextension/
 │   ├── register_types.cpp  entry_symbol physics_library_init
 │   ├── sand_world.*        класс SandWorld: разбор JSON, API, save/load
 │   ├── sim.h / sim.cpp     сетка SoA, чанки 64×64, движение, тепло, фазы, горение, взрывы, кислота, реакции
-│   ├── sim_neutrons.cpp    нейтроны
-│   └── sim_render.cpp      цветовой буфер (3 вида)
+│   ├── sim_neutrons.cpp    нейтроны (точный обход клеток, DDA)
+│   ├── sim_air.cpp         поле воздуха (stable fluids 4×4), ветер, перенос тепла воздухом
+│   └── sim_render.cpp      цветовые буферы (виды 0–3 и слой воздуха), всё через LUT
 └── test/
     ├── fixture_materials.json   минимальный набор материалов для тестов
     └── test.gd                  headless-проверка (см. ниже)
@@ -98,6 +99,9 @@ printf 'config_version=5\n[application]\nconfig/name="simtest"\n' > $D/project.g
 echo 'res://bin/physics.gdextension' > $D/.godot/extension_list.cfg
 godot --headless --path $D -s test.gd                 # все тесты
 godot --headless --path $D -s test.gd -- only=pot tts=12   # только кастрюля с другим thermal_time_scale
+# на настоящих данных: скопировать data/materials.json и reactions.json в $D и
+godot --headless --path $D -s test.gd -- data=res://materials.json reactions=res://reactions.json
+# only=sand|pot|nuke|save|misc|air|boron|perf
 ```
 
 Редактор Godot (и `godot --headless`) грузит `*.debug`-библиотеку. Чтобы замерить release, в копии

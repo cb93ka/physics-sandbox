@@ -43,13 +43,13 @@ func setup(app_state: AppState, palette: Array[Dictionary], categories: Array[Di
 	_margin.add_child(col)
 
 	top_bar = TopBar.new()
+	col.add_child(top_bar)
 	top_bar.setup(state)
 	top_bar.step_pressed.connect(func() -> void: step_requested.emit())
 	top_bar.undo_pressed.connect(func() -> void: undo_requested.emit())
 	top_bar.clear_pressed.connect(confirm_clear)
 	top_bar.saves_pressed.connect(open_saves)
 	top_bar.settings_pressed.connect(open_settings)
-	col.add_child(top_bar)
 
 	_middle = Control.new()
 	_middle.size_flags_vertical = Control.SIZE_EXPAND_FILL

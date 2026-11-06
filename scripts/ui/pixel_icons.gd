@@ -57,6 +57,10 @@ const PATTERNS := {
 		"#######....", "#.....#....", "#.....#....", "#...#######", "#...#.....#", "#...#.....#",
 		"#######...#", "....#.....#", "....#.....#", "....#######", "...........",
 	],
+	"wind": [
+		"...........", "......##...", ".......#...", "########...", "...........", "##########.",
+		"..........#", "########.#.", "...........", ".#####.....", "......#....",
+	],
 	"up": [
 		"...........", "...........", "...........", ".....#.....", "....###....", "...##.##...",
 		"..##...##..", ".##.....##.", "...........", "...........", "...........",
@@ -98,8 +102,9 @@ static func get_icon(icon_name: String) -> Texture2D:
 
 
 ## Квадратная цветная плашка для материала (с тёмной рамкой и бликом).
-static func swatch(col: Color, px: int = 16) -> Texture2D:
-	var key := "sw_%s_%d" % [col.to_html(false), px]
+## arrow — направление стрелки поверх (для вентиляторов), Vector2i.ZERO — без стрелки.
+static func swatch(col: Color, px: int = 16, arrow: Vector2i = Vector2i.ZERO) -> Texture2D:
+	var key := "sw_%s_%d_%d_%d" % [col.to_html(false), px, arrow.x, arrow.y]
 	if _cache.has(key):
 		return _cache[key]
 	var img := Image.create_empty(px, px, false, Image.FORMAT_RGBA8)
@@ -107,6 +112,34 @@ static func swatch(col: Color, px: int = 16) -> Texture2D:
 	img.fill_rect(Rect2i(2, 2, px - 4, px - 4), col)
 	img.fill_rect(Rect2i(2, 2, px - 4, 2), col.lightened(0.25))
 	img.fill_rect(Rect2i(2, px - 4, px - 4, 2), col.darkened(0.25))
+	if arrow != Vector2i.ZERO:
+		_draw_arrow(img, px, arrow, Color.WHITE if col.get_luminance() < 0.6 else Color(0.05, 0.05, 0.08))
 	var tex := ImageTexture.create_from_image(img)
 	_cache[key] = tex
 	return tex
+
+
+static func _draw_arrow(img: Image, px: int, dir: Vector2i, c: Color) -> void:
+	# Стрелка «вверх» в квадрате px×px, затем поворот под dir.
+	var mid := px / 2.0
+	for t in range(3, px - 3):
+		_put_rot(img, px, Vector2(mid - 0.5, float(t)), dir, c)
+		_put_rot(img, px, Vector2(mid - 1.5, float(t)), dir, c)
+	for k in range(0, 4):
+		for s in [-1.0, 1.0]:
+			_put_rot(img, px, Vector2(mid - 1.0 + s * (float(k) + 0.5), 4.0 + float(k)), dir, c)
+
+
+static func _put_rot(img: Image, px: int, p: Vector2, dir: Vector2i, c: Color) -> void:
+	var q := p
+	var m := float(px - 1)
+	if dir == Vector2i(0, 1):
+		q = Vector2(p.x, m - p.y)
+	elif dir == Vector2i(1, 0):
+		q = Vector2(m - p.y, p.x)
+	elif dir == Vector2i(-1, 0):
+		q = Vector2(p.y, p.x)
+	var x := roundi(q.x)
+	var y := roundi(q.y)
+	if x >= 0 and y >= 0 and x < px and y < px:
+		img.set_pixel(x, y, c)

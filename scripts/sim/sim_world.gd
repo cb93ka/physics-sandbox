@@ -5,16 +5,24 @@ extends RefCounted
 ## Методы повторяют docs/api.md один в один.
 
 var is_native := false
+## Ядро умеет поле воздуха (v0.1.1). Без него вид «Воздух» работает без трассеров.
+var has_air := false
+var has_air_layer := false
 var _w: Variant
 
 
-func _init() -> void:
-	if ClassDB.class_exists("SandWorld"):
+func _init(force_mock: bool = false) -> void:
+	if ClassDB.class_exists("SandWorld") and not force_mock:
 		_w = ClassDB.instantiate("SandWorld")
 		is_native = true
 	else:
 		push_warning("SandWorld (GDExtension) не найден — работает медленная заглушка SandWorldMock")
 		_w = SandWorldMock.new()
+	var obj := _w as Object
+	has_air = obj.has_method("get_air_velocity") and obj.has_method("get_air_grid_size")
+	has_air_layer = obj.has_method("get_air_layer")
+	if not has_air:
+		push_warning("Ядро без поля воздуха (get_air_*) — вид «Воздух» без трассеров, ветер выключен")
 
 
 func load_materials(data: Dictionary) -> bool:
@@ -120,3 +128,33 @@ func erase_line(a: Vector2i, b: Vector2i, r: int) -> void:
 	for s in range(steps + 1):
 		var p := Vector2(a) + d * (float(s) / float(steps))
 		erase_circle(Vector2i(roundi(p.x), roundi(p.y)), r)
+
+
+# --- Поле воздуха (v0.1.1). Если ядро старое — безопасные заглушки. ---
+
+func get_air_grid_size() -> Vector2i:
+	return _w.get_air_grid_size() if has_air else Vector2i.ZERO
+
+
+func get_air_velocity() -> PackedFloat32Array:
+	return _w.get_air_velocity() if has_air else PackedFloat32Array()
+
+
+func get_air_cell_scale() -> int:
+	if has_air and (_w as Object).has_method("get_air_cell_scale"):
+		return int(_w.get_air_cell_scale())
+	return 4
+
+
+func add_air_impulse(c: Vector2i, r: int, v: Vector2) -> void:
+	if has_air and (_w as Object).has_method("add_air_impulse"):
+		_w.add_air_impulse(c, r, v)
+
+
+func set_air_enabled(on: bool) -> void:
+	if has_air and (_w as Object).has_method("set_air_enabled"):
+		_w.set_air_enabled(on)
+
+
+func get_air_layer(view: int) -> PackedByteArray:
+	return _w.get_air_layer(view) if has_air_layer else PackedByteArray()

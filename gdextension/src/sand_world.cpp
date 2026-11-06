@@ -135,6 +135,13 @@ void SandWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cell", "p"), &SandWorld::get_cell);
 	ClassDB::bind_method(D_METHOD("get_stats"), &SandWorld::get_stats);
 
+	ClassDB::bind_method(D_METHOD("get_air_grid_size"), &SandWorld::get_air_grid_size);
+	ClassDB::bind_method(D_METHOD("get_air_velocity"), &SandWorld::get_air_velocity);
+	ClassDB::bind_method(D_METHOD("get_air_cell_scale"), &SandWorld::get_air_cell_scale);
+	ClassDB::bind_method(D_METHOD("add_air_impulse", "c", "r", "v"), &SandWorld::add_air_impulse);
+	ClassDB::bind_method(D_METHOD("set_air_enabled", "on"), &SandWorld::set_air_enabled);
+	ClassDB::bind_method(D_METHOD("get_air_layer", "view"), &SandWorld::get_air_layer);
+
 	ClassDB::bind_method(D_METHOD("save_bytes"), &SandWorld::save_bytes);
 	ClassDB::bind_method(D_METHOD("load_bytes", "data"), &SandWorld::load_bytes);
 
@@ -300,6 +307,42 @@ bool SandWorld::load_materials(const Dictionary &data) {
 			if (M.state != sim::ST_SOLID) P.fail(ctx + ": fixed_temp materials must be 'solid'");
 		}
 		if (M.category == "metal") M.flags |= sim::MF_METAL;
+
+		// v0.1.1
+		M.wind_coupling = std::min(1.0f, std::max(0.0f, (float)P.num(d, "wind_coupling", gaslike && k != 0 ? 1.0 : 0.0, ctx)));
+		if (k == 0) M.wind_coupling = 0.0f;
+		M.gas_alpha = std::min(1.0f, std::max(0.0f, (float)P.num(d, "gas_alpha", M.state == sim::ST_FIRE ? 0.85 : 0.5, ctx)));
+		if (P.obj(d, "emit", o, ctx)) {
+			std::string c = ctx + ".emit";
+			M.emit_into = P.ref(o, "into", -1, c);
+			if (M.emit_into < 0) P.fail(c + ": missing 'into'");
+			M.emit_rate = (float)P.num(o, "rate", 20, c);
+			M.emit_temp = o.has("temp") && is_num(o["temp"]) ? (float)(double)o["temp"] : NAN;
+			if (M.emit_into > 0 && M.emit_rate > 0) M.flags |= sim::MF_EMIT;
+		}
+		if (P.obj(d, "drain", o, ctx)) {
+			M.drain_rate = (float)P.num(o, "rate", 60, ctx + ".drain");
+			if (M.drain_rate > 0) M.flags |= sim::MF_DRAIN;
+		}
+		if (P.obj(d, "fan", o, ctx)) {
+			std::string c = ctx + ".fan";
+			float fx = 0, fy = -1;
+			if (o.has("dir") && o["dir"].get_type() == Variant::ARRAY) {
+				Array a = o["dir"];
+				if (a.size() >= 2 && is_num(a[0]) && is_num(a[1])) {
+					fx = (float)(double)a[0];
+					fy = (float)(double)a[1];
+				} else P.fail(c + ": 'dir' must be [x, y]");
+			}
+			float l = std::sqrt(fx * fx + fy * fy);
+			if (l < 1e-6f) P.fail(c + ": 'dir' must be non-zero");
+			else {
+				M.fan_dx = fx / l;
+				M.fan_dy = fy / l;
+			}
+			M.fan_strength = (float)P.num(o, "strength", 40, c);
+			M.flags |= sim::MF_FAN;
+		}
 	}
 	if (!P.err.empty()) {
 		UtilityFunctions::push_error(String::utf8(("SandWorld.load_materials: " + P.err).c_str()));
@@ -451,6 +494,29 @@ void SandWorld::erase_circle(const Vector2i &c, int r) { w.erase_circle(c.x, c.y
 void SandWorld::heat_circle(const Vector2i &c, int r, double watts, double delta) { w.heat_circle(c.x, c.y, r, (float)watts, (float)delta); }
 void SandWorld::spawn_neutrons(const Vector2i &c, int r, int count) { w.spawn_neutrons(c.x, c.y, r, count); }
 
+PackedFloat32Array SandWorld::get_air_velocity() const {
+	PackedFloat32Array out;
+	const int64_t n = (int64_t)w.AW * w.AH;
+	out.resize(n * 2);
+	if (n == 0) return out;
+	float *p = out.ptrw();
+	for (int64_t i = 0; i < n; i++) {
+		p[2 * i] = w.au[i];
+		p[2 * i + 1] = w.av[i];
+	}
+	return out;
+}
+
+void SandWorld::add_air_impulse(const Vector2i &c, int r, const Vector2 &v) { w.air_impulse(c.x, c.y, r, v.x, v.y); }
+
+PackedByteArray SandWorld::get_air_layer(int view) {
+	const int64_t n = (int64_t)w.AW * w.AH * 4;
+	if (air_buf.size() != n) air_buf.resize(n);
+	if (n == 0) return air_buf;
+	w.render_air(view, air_buf.ptrw());
+	return air_buf;
+}
+
 PackedByteArray SandWorld::get_color_buffer(int view) {
 	const int64_t n = (int64_t)w.W * w.H * 4;
 	if (color_buf.size() != n) color_buf.resize(n);
@@ -482,6 +548,14 @@ Dictionary SandWorld::get_stats() const {
 	d["neutrons"] = (int)w.neutrons.size();
 	d["fissions_per_sec"] = w.fissions_per_sec;
 	d["max_temp"] = w.max_temp;
+	// extra: per-pass timings (ms, smoothed)
+	Dictionary pm;
+	static const char *names[6] = { "move", "air", "wind", "special", "neutrons", "heat" };
+	for (int k = 0; k < 6; k++) pm[names[k]] = w.pass_ms[k];
+	pm["heat_substeps"] = w.heat_substeps;
+	pm["heat_chunks"] = w.heat_chunks;
+	pm["stiff_mat"] = w.stiff_mat >= 0 ? String::utf8(w.mats[w.stiff_mat].id.c_str()) : String();
+	d["pass_ms"] = pm;
 	return d;
 }
 
@@ -507,7 +581,7 @@ double SandWorld::get_mean_temp(int id) const {
 
 namespace {
 const uint32_t SAVE_MAGIC = 0x57444E53; // "SNDW"
-const uint32_t SAVE_VERSION = 1;
+const uint32_t SAVE_VERSION = 2; // v2 (0.1.1): + air field; v1 still loads
 
 struct Writer {
 	std::vector<uint8_t> b;
@@ -556,11 +630,12 @@ struct Reader {
 };
 } // namespace
 
-// Layout (little-endian):
+// Layout (little-endian), version 2:
 //   u32 magic "SNDW", u32 version, u32 W, u32 H, f32 ambient, u8 gravity dir,
 //   u16 nmats, nmats * (u16 len, utf8 id),
 //   W*H u8 mat, W*H u8 var, W*H u8 flags, W*H f32 temp, W*H f32 phase, W*H f32 life,
-//   u32 neutrons, n * (f32 x, f32 y, f32 vx, f32 vy, f32 age, u8 fast)
+//   u32 neutrons, n * (f32 x, f32 y, f32 vx, f32 vy, f32 age, u8 fast),
+//   [v2] u32 AW, u32 AH, AW*AH * (f32 vx, f32 vy)
 PackedByteArray SandWorld::save_bytes() const {
 	Writer wr;
 	const size_t n = (size_t)w.W * w.H;
@@ -593,6 +668,13 @@ PackedByteArray SandWorld::save_bytes() const {
 		wr.f32(nt.age);
 		wr.u8(nt.fast);
 	}
+	// v2: air field
+	wr.u32((uint32_t)w.AW);
+	wr.u32((uint32_t)w.AH);
+	for (size_t i = 0; i < (size_t)w.AW * w.AH; i++) {
+		wr.f32(w.au[i]);
+		wr.f32(w.av[i]);
+	}
 	PackedByteArray out;
 	out.resize((int64_t)wr.b.size());
 	if (!wr.b.empty()) memcpy(out.ptrw(), wr.b.data(), wr.b.size());
@@ -610,7 +692,7 @@ bool SandWorld::load_bytes(const PackedByteArray &data) {
 		return false;
 	}
 	uint32_t ver = rd.u32();
-	if (ver != SAVE_VERSION) {
+	if (ver != 1 && ver != 2) {
 		UtilityFunctions::push_error("SandWorld.load_bytes: unsupported version ", (int64_t)ver);
 		return false;
 	}
@@ -669,6 +751,17 @@ bool SandWorld::load_bytes(const PackedByteArray &data) {
 		nt.fast = rd.u8();
 		if (rd.ok && w.inb((int)nt.x, (int)nt.y)) w.neutrons.push_back(nt);
 	}
+	if (ver >= 2 && rd.ok) {
+		uint32_t aw = rd.u32(), ah = rd.u32();
+		if (rd.ok && (int)aw == w.AW && (int)ah == w.AH && rd.o + (size_t)aw * ah * 8 <= rd.n) {
+			for (size_t i = 0; i < (size_t)aw * ah; i++) {
+				float u = rd.f32(), v = rd.f32();
+				w.au[i] = std::isfinite(u) ? u : 0.0f;
+				w.av[i] = std::isfinite(v) ? v : 0.0f;
+			}
+		}
+	}
+	// v1 saves: the air field stays zero (setup() cleared it)
 	w.recount();
 	w.wake_all();
 	accumulator = 0.0;

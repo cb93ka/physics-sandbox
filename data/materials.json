@@ -104,6 +104,7 @@
       "colors": ["#d9c27e", "#e3cd8b", "#cfb56e", "#e8d59a"],
       "melt": {"temp": 1710, "into": "molten_glass", "latent": 156000},
       "acid_resistance": 0.9,
+      "wind_coupling": 0.0,
       "desc": "Песок: кварц SiO₂, плавится около 1710 °C в стекломассу."
     },
     {
@@ -117,6 +118,7 @@
       "colors": ["#6b4a2f", "#5e4028", "#77533a"],
       "melt": {"temp": 1150, "into": "lava", "latent": 400000},
       "acid_resistance": 0.4,
+      "wind_coupling": 0.0,
       "desc": "Сухая земля проводит тепло в пять раз хуже камня."
     },
     {
@@ -130,6 +132,7 @@
       "colors": ["#8a8580", "#76716c", "#9b968f", "#6a6560"],
       "melt": {"temp": 1150, "into": "lava", "latent": 400000},
       "acid_resistance": 0.6,
+      "wind_coupling": 0.0,
       "desc": "Гравий: дроблёный камень, насыпная плотность около 1,7 т/м³."
     },
     {
@@ -142,6 +145,7 @@
       "heat_capacity": 880,
       "colors": ["#f2f0ea", "#e6e4dc", "#fbfaf6"],
       "acid_resistance": 0.8,
+      "wind_coupling": 0.0,
       "desc": "Поваренная соль NaCl: растворяется в воде, а со льдом даёт смесь до −21 °C."
     },
     {
@@ -155,6 +159,7 @@
       "initial_temp": -5.0,
       "colors": ["#f4f8fc", "#e8f0f8", "#ffffff"],
       "melt": {"temp": 0, "into": "water", "latent": 334000},
+      "wind_coupling": 0.4,
       "desc": "Снег на 90 % состоит из воздуха и потому хорошо держит тепло."
     },
     {
@@ -167,6 +172,7 @@
       "heat_capacity": 800,
       "colors": ["#8f8b87", "#a19c97", "#7d7975"],
       "acid_resistance": 0.5,
+      "wind_coupling": 0.5,
       "desc": "Пепел: несгоревшие минеральные остатки, лёгкий и плохо проводит тепло."
     },
     {
@@ -187,6 +193,7 @@
         "heat": 29000000.0
       },
       "acid_resistance": 0.6,
+      "wind_coupling": 0.0,
       "desc": "Каменный уголь даёт при сгорании около 29 МДж/кг."
     },
     {
@@ -394,6 +401,8 @@
       "colors": ["#c9d3dc", "#d6dee5", "#bcc7d1"],
       "condense": {"temp": 100, "into": "water", "latent": 2257000},
       "nuclear": {"moderate": 0.003, "absorb": 3e-05},
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.45,
       "desc": "Водяной пар: при конденсации отдаёт 2,26 МДж/кг — потому паром так легко обжечься."
     },
     {
@@ -408,6 +417,8 @@
       "colors": ["#4a4a4f", "#55555a", "#3f3f44"],
       "lifetime": [3, 8],
       "decay_into": "air",
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.8,
       "desc": "Дым: горячие газы и сажа, поднимается и рассеивается."
     },
     {
@@ -420,6 +431,9 @@
       "heat_capacity": 844,
       "thermal_expansion": 0.00341,
       "colors": ["#5e6670", "#666e78", "#565e68"],
+      "condense": {"temp": -78.5, "into": "dry_ice", "latent": 571000},
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.3,
       "desc": "CO₂ в полтора раза тяжелее воздуха, стекает вниз и тушит огонь."
     },
     {
@@ -440,6 +454,8 @@
         "residue_chance": 0.6,
         "heat": 120000000.0
       },
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.25,
       "desc": "Водород в 14 раз легче воздуха, смесь с кислородом взрывается (гремучий газ)."
     },
     {
@@ -452,6 +468,8 @@
       "heat_capacity": 918,
       "thermal_expansion": 0.00341,
       "colors": ["#a9d4ff", "#b9dcff"],
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.3,
       "desc": "Чистый кислород раздувает пламя: в нём горит даже сталь."
     },
     {
@@ -465,6 +483,8 @@
       "thermal_expansion": 0.00341,
       "colors": ["#7d8fb3", "#8798bc"],
       "condense": {"temp": -195.8, "into": "liquid_nitrogen", "latent": 199000},
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.3,
       "desc": "Азот: 78 % воздуха, инертен, сжижается при −196 °C."
     },
     {
@@ -477,6 +497,8 @@
       "heat_capacity": 5193,
       "thermal_expansion": 0.00341,
       "colors": ["#ffd7a8", "#ffe0b8"],
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.25,
       "desc": "Гелий не захватывает нейтроны, поэтому им охлаждают высокотемпературные реакторы."
     },
     {
@@ -497,6 +519,8 @@
         "residue_chance": 0.3,
         "heat": 50000000.0
       },
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.3,
       "desc": "Метан — основа природного газа, легче воздуха, даёт 50 МДж/кг."
     },
     {
@@ -511,6 +535,8 @@
       "colors": ["#9bb83a", "#a9c444", "#8eaa32"],
       "lifetime": [20, 40],
       "decay_into": "air",
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.6,
       "desc": "Сернистый газ SO₂ ядовит и тяжелее воздуха, выделяется из горячей серной кислоты."
     },
     {
@@ -526,6 +552,8 @@
       "colors": ["#9aa3ad", "#a8b0b9"],
       "condense": {"temp": 356.7, "into": "mercury", "latent": 295000},
       "nuclear": {"absorb": 0.002},
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.6,
       "desc": "Пары ртути ядовиты и при остывании ниже 357 °C снова оседают каплями."
     },
     {
@@ -628,8 +656,8 @@
         "temp": 350,
         "into": "fire",
         "burn_time": [5, 10],
-        "residue": "smoke",
-        "residue_chance": 0.5,
+        "residue": "soot",
+        "residue_chance": 0.4,
         "heat": 32000000.0
       },
       "acid_resistance": 0.8,
@@ -806,7 +834,7 @@
       "heat_capacity": 129,
       "colors": ["#e6b422", "#f0c43a", "#d4a316"],
       "acid_resistance": 1.0,
-      "nuclear": {"absorb": 0.3},
+      "nuclear": {"absorb": 0.95},
       "desc": "Золото не берёт кислота, но его растворяет ртуть."
     },
     {
@@ -1100,7 +1128,7 @@
       "heat_capacity": 950,
       "colors": ["#2e3138", "#383b43", "#27292f"],
       "acid_resistance": 1.0,
-      "nuclear": {"absorb": 0.85},
+      "nuclear": {"absorb": 0.99},
       "desc": "Карбид бора — материал регулирующих стержней: бор-10 жадно ловит нейтроны."
     },
     {
@@ -1113,7 +1141,7 @@
       "heat_capacity": 231,
       "colors": ["#a3aab8", "#aeb5c2", "#97a0ae"],
       "acid_resistance": 0.3,
-      "nuclear": {"absorb": 0.9},
+      "nuclear": {"absorb": 0.99},
       "desc": "Кадмий поглощает тепловые нейтроны сильнее почти всех металлов."
     },
     {
@@ -1126,7 +1154,7 @@
       "heat_capacity": 144,
       "colors": ["#7b8090", "#868b9b", "#6f7484"],
       "acid_resistance": 0.9,
-      "nuclear": {"absorb": 0.75},
+      "nuclear": {"absorb": 0.97},
       "desc": "Гафний — поглотитель для стержней подводных реакторов, плавится при 2233 °C."
     },
     {
@@ -1167,7 +1195,9 @@
       "colors": ["#b06ad8", "#bd7ae2"],
       "lifetime": [20, 40],
       "decay_into": "air",
-      "nuclear": {"absorb": 0.95},
+      "nuclear": {"absorb": 0.99},
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.4,
       "desc": "Ксенон-135 — самый сильный поглотитель нейтронов, причина «йодной ямы»."
     },
     {
@@ -1198,6 +1228,8 @@
       "glow": true,
       "lifetime": [0.5, 1.5],
       "decay_into": "smoke",
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.9,
       "hidden": false,
       "desc": "Пламя: горячие газы около 1000 °C, поднимаются и превращаются в дым."
     },
@@ -1211,6 +1243,7 @@
       "heat_capacity": 900,
       "colors": ["#3b3b3f", "#47464b", "#2f2f33"],
       "explosive": {"temp": 300, "radius": 5, "energy": 3000000.0, "into": "smoke"},
+      "wind_coupling": 0.0,
       "desc": "Чёрный порох: селитра, уголь и сера, вспыхивает около 300 °C."
     },
     {
@@ -1289,7 +1322,597 @@
         "residue_chance": 0.5,
         "heat": 4000000.0
       },
+      "wind_coupling": 0.0,
       "desc": "Термит (алюминий + окалина) горит при 2500 °C и оставляет жидкое железо."
+    },
+    {
+      "id": "fan_up",
+      "name": "Вентилятор ↑",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#5b6b7a", "#677788", "#50606e"],
+      "acid_resistance": 1.0,
+      "fan": {"dir": [0, -1], "strength": 40},
+      "desc": "Вентилятор гонит воздух вверх со скоростью 40 клеток/с (0,4 м/с)."
+    },
+    {
+      "id": "fan_down",
+      "name": "Вентилятор ↓",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#5b6b7a", "#677788", "#50606e"],
+      "acid_resistance": 1.0,
+      "fan": {"dir": [0, 1], "strength": 40},
+      "desc": "Вентилятор гонит воздух вниз со скоростью 40 клеток/с (0,4 м/с)."
+    },
+    {
+      "id": "fan_left",
+      "name": "Вентилятор ←",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#5b6b7a", "#677788", "#50606e"],
+      "acid_resistance": 1.0,
+      "fan": {"dir": [-1, 0], "strength": 40},
+      "desc": "Вентилятор гонит воздух влево со скоростью 40 клеток/с (0,4 м/с)."
+    },
+    {
+      "id": "fan_right",
+      "name": "Вентилятор →",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#5b6b7a", "#677788", "#50606e"],
+      "acid_resistance": 1.0,
+      "fan": {"dir": [1, 0], "strength": 40},
+      "desc": "Вентилятор гонит воздух вправо со скоростью 40 клеток/с (0,4 м/с)."
+    },
+    {
+      "id": "tap_water",
+      "name": "Кран воды",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#3c5f8a", "#45699a", "#35557c"],
+      "acid_resistance": 1.0,
+      "emit": {"into": "water", "rate": 20, "temp": null},
+      "desc": "Кран: 20 клеток воды в секунду, примерно 20 мл/с, как открытый смеситель."
+    },
+    {
+      "id": "tap_lava",
+      "name": "Источник лавы",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#7a3418", "#8a3c1c", "#6a2c14"],
+      "glow": true,
+      "acid_resistance": 1.0,
+      "emit": {"into": "lava", "rate": 10, "temp": null},
+      "desc": "Жерло: выпускает лаву при 1200 °C, как трещина на склоне вулкана."
+    },
+    {
+      "id": "tap_sand",
+      "name": "Песочница",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#8c7a4a", "#9a8754", "#7e6d40"],
+      "acid_resistance": 1.0,
+      "emit": {"into": "sand", "rate": 20, "temp": null},
+      "desc": "Бункер с песком: сыплет 20 клеток в секунду."
+    },
+    {
+      "id": "tap_methane",
+      "name": "Газовый вентиль",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#4f7a55", "#5a8760", "#456c4a"],
+      "acid_resistance": 1.0,
+      "emit": {"into": "methane", "rate": 15, "temp": null},
+      "desc": "Вентиль природного газа: метан без запаха, одорант добавляют для безопасности."
+    },
+    {
+      "id": "tap_steam",
+      "name": "Паровой клапан",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#7d8792", "#89939e", "#717b86"],
+      "acid_resistance": 1.0,
+      "emit": {"into": "steam", "rate": 15, "temp": null},
+      "desc": "Клапан выпускает пар при 110 °C."
+    },
+    {
+      "id": "tap_liquid_nitrogen",
+      "name": "Сосуд Дьюара",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#8fb6cc", "#9cc2d8", "#82a9bf"],
+      "acid_resistance": 1.0,
+      "emit": {"into": "liquid_nitrogen", "rate": 15, "temp": null},
+      "desc": "Дьюар с жидким азотом: двойные стенки с вакуумом между ними держат −196 °C."
+    },
+    {
+      "id": "void",
+      "name": "Сток",
+      "category": "special",
+      "state": "solid",
+      "density": 7850,
+      "conductivity": 50,
+      "heat_capacity": 490,
+      "colors": ["#050507", "#08080b", "#030304"],
+      "acid_resistance": 1.0,
+      "drain": {"rate": 60},
+      "desc": "Сток поглощает жидкости, порошки и газы — 60 клеток в секунду."
+    },
+    {
+      "id": "diamond",
+      "name": "Алмаз",
+      "category": "solid",
+      "state": "solid",
+      "density": 3510,
+      "conductivity": 2200,
+      "heat_capacity": 509,
+      "colors": ["#d8f4ff", "#c6ecfb", "#eefbff", "#b4e2f5"],
+      "ignite": {
+        "temp": 700,
+        "into": "fire",
+        "burn_time": [20, 40],
+        "residue": "co2",
+        "residue_chance": 0.5,
+        "heat": 32900000.0
+      },
+      "acid_resistance": 1.0,
+      "nuclear": {"moderate": 0.3, "reflect": 0.2, "absorb": 0.003},
+      "desc": "Алмаз проводит тепло в 5 раз лучше меди, а выше 700 °C на воздухе сгорает в CO₂."
+    },
+    {
+      "id": "silver",
+      "name": "Серебро",
+      "category": "metal",
+      "state": "solid",
+      "density": 10490,
+      "conductivity": 429,
+      "heat_capacity": 235,
+      "colors": ["#d6dbe0", "#e4e8ec", "#c8cdd3"],
+      "melt": {"temp": 961.8, "into": "molten_silver", "latent": 104800},
+      "acid_resistance": 0.8,
+      "nuclear": {"absorb": 0.95},
+      "desc": "Серебро — самый теплопроводный металл (429 Вт/(м·К)), из сплава Ag-In-Cd делают стержни PWR."
+    },
+    {
+      "id": "molten_silver",
+      "name": "Жидкое серебро",
+      "category": "metal",
+      "state": "liquid",
+      "density": 10197.9,
+      "conductivity": 175,
+      "heat_capacity": 310,
+      "thermal_expansion": 0.0001,
+      "initial_temp": 1000.0,
+      "colors": ["#ffd9a0", "#ffe6bd", "#f5cc8c"],
+      "glow": true,
+      "viscosity": 0.15,
+      "freeze": {"temp": 961.8, "into": "silver", "latent": 104800},
+      "acid_resistance": 0.8,
+      "nuclear": {"absorb": 0.95},
+      "desc": "Расплав серебра: 962 °C, течёт почти как вода."
+    },
+    {
+      "id": "gallium",
+      "name": "Галлий",
+      "category": "metal",
+      "state": "solid",
+      "density": 5910,
+      "conductivity": 40.6,
+      "heat_capacity": 371,
+      "colors": ["#a9b3bd", "#b6bfc8", "#9ca6b0"],
+      "melt": {"temp": 29.8, "into": "liquid_gallium", "latent": 80100},
+      "acid_resistance": 0.5,
+      "nuclear": {"absorb": 0.14},
+      "desc": "Галлий плавится при 29,8 °C — тает в руке."
+    },
+    {
+      "id": "liquid_gallium",
+      "name": "Жидкий галлий",
+      "category": "metal",
+      "state": "liquid",
+      "density": 6102.2,
+      "conductivity": 28,
+      "heat_capacity": 397,
+      "thermal_expansion": 0.00012,
+      "initial_temp": 40.0,
+      "colors": ["#c3ccd5", "#d0d8e0", "#b6c0ca"],
+      "viscosity": 0.05,
+      "freeze": {"temp": 29.8, "into": "gallium", "latent": 80100},
+      "acid_resistance": 0.5,
+      "nuclear": {"absorb": 0.14},
+      "desc": "Жидкий галлий плотнее твёрдого, как вода, и проникает в алюминий, делая его хрупким."
+    },
+    {
+      "id": "aluminum_powder",
+      "name": "Алюминиевая пудра",
+      "category": "powder",
+      "state": "powder",
+      "density": 1300,
+      "conductivity": 1.0,
+      "heat_capacity": 897,
+      "colors": ["#b9bec4", "#c7ccd1", "#abb0b6"],
+      "ignite": {
+        "temp": 650,
+        "into": "fire",
+        "burn_time": [1, 3],
+        "residue": "ash",
+        "residue_chance": 0.7,
+        "heat": 31000000.0
+      },
+      "acid_resistance": 0.3,
+      "nuclear": {"absorb": 0.005},
+      "wind_coupling": 0.0,
+      "desc": "Алюминиевая пудра горит ярко, её смесь с окалиной — термит."
+    },
+    {
+      "id": "aerogel",
+      "name": "Аэрогель",
+      "category": "solid",
+      "state": "solid",
+      "density": 100,
+      "conductivity": 0.015,
+      "heat_capacity": 1000,
+      "colors": ["#cfdcf0", "#dbe5f5", "#c2d1e9"],
+      "melt": {"temp": 1200, "into": "molten_glass", "latent": 140000},
+      "acid_resistance": 0.6,
+      "desc": "Кварцевый аэрогель на 95 % состоит из воздуха и держит тепло лучше воздуха (0,015 Вт/(м·К))."
+    },
+    {
+      "id": "dry_ice",
+      "name": "Сухой лёд",
+      "category": "solid",
+      "state": "solid",
+      "density": 1560,
+      "conductivity": 0.6,
+      "heat_capacity": 840,
+      "initial_temp": -80.0,
+      "colors": ["#e8eef2", "#dde6ec", "#f2f6f8"],
+      "melt": {"temp": -78.5, "into": "co2", "latent": 571000},
+      "desc": "Сухой лёд при −78,5 °C сразу переходит в газ, минуя жидкость."
+    },
+    {
+      "id": "paraffin",
+      "name": "Парафин",
+      "category": "solid",
+      "state": "solid",
+      "density": 900,
+      "conductivity": 0.25,
+      "heat_capacity": 2140,
+      "colors": ["#f0ead2", "#f6f1de", "#e8e1c4"],
+      "melt": {"temp": 60, "into": "molten_paraffin", "latent": 210000},
+      "ignite": {
+        "temp": 245,
+        "into": "fire",
+        "burn_time": [5, 10],
+        "residue": "smoke",
+        "residue_chance": 0.2,
+        "heat": 42000000.0
+      },
+      "acid_resistance": 0.9,
+      "nuclear": {"moderate": 0.35, "absorb": 0.01},
+      "desc": "Парафин плавится при 60 °C; богат водородом и замедляет нейтроны — им Чедвик открыл нейтрон."
+    },
+    {
+      "id": "molten_paraffin",
+      "name": "Жидкий парафин",
+      "category": "liquid",
+      "state": "liquid",
+      "density": 815.1,
+      "conductivity": 0.15,
+      "heat_capacity": 2900,
+      "thermal_expansion": 0.0009,
+      "initial_temp": 70.0,
+      "colors": ["#f4eaba", "#f8f0c8", "#eee2a8"],
+      "viscosity": 0.2,
+      "freeze": {"temp": 60, "into": "paraffin", "latent": 210000},
+      "ignite": {
+        "temp": 245,
+        "into": "fire",
+        "burn_time": [5, 10],
+        "residue": "smoke",
+        "residue_chance": 0.2,
+        "heat": 42000000.0
+      },
+      "acid_resistance": 0.9,
+      "nuclear": {"moderate": 0.35, "absorb": 0.01},
+      "desc": "Жидкий парафин — то, что стекает со свечи."
+    },
+    {
+      "id": "sulfur",
+      "name": "Сера",
+      "category": "powder",
+      "state": "powder",
+      "density": 2070,
+      "conductivity": 0.205,
+      "heat_capacity": 710,
+      "colors": ["#e8d43a", "#f0de52", "#dcc72a"],
+      "melt": {"temp": 115.2, "into": "molten_sulfur", "latent": 53600},
+      "ignite": {
+        "temp": 232,
+        "into": "fire",
+        "burn_time": [3, 6],
+        "residue": "toxic_gas",
+        "residue_chance": 0.8,
+        "heat": 9270000.0
+      },
+      "acid_resistance": 0.9,
+      "wind_coupling": 0.0,
+      "desc": "Сера плавится при 115 °C и горит синим пламенем, выделяя ядовитый SO₂."
+    },
+    {
+      "id": "molten_sulfur",
+      "name": "Жидкая сера",
+      "category": "liquid",
+      "state": "liquid",
+      "density": 1910.0,
+      "conductivity": 0.15,
+      "heat_capacity": 970,
+      "thermal_expansion": 0.0005,
+      "initial_temp": 125.0,
+      "colors": ["#d9902a", "#e49e36", "#cc8220"],
+      "viscosity": 0.3,
+      "freeze": {"temp": 115.2, "into": "sulfur", "latent": 53600},
+      "ignite": {
+        "temp": 232,
+        "into": "fire",
+        "burn_time": [3, 6],
+        "residue": "toxic_gas",
+        "residue_chance": 0.8,
+        "heat": 9270000.0
+      },
+      "acid_resistance": 0.9,
+      "desc": "Жидкая сера темнеет от жёлтой до красно-бурой при нагреве."
+    },
+    {
+      "id": "white_phosphorus",
+      "name": "Белый фосфор",
+      "category": "energy",
+      "state": "solid",
+      "density": 1823,
+      "conductivity": 0.236,
+      "heat_capacity": 769,
+      "colors": ["#f2efd8", "#f8f5e4", "#e8e4c6"],
+      "ignite": {
+        "temp": 34,
+        "into": "fire",
+        "burn_time": [3, 6],
+        "residue": "smoke",
+        "residue_chance": 0.6,
+        "heat": 24100000.0
+      },
+      "desc": "Белый фосфор самовоспламеняется на воздухе около 34 °C, поэтому его хранят под водой."
+    },
+    {
+      "id": "lithium",
+      "name": "Литий",
+      "category": "metal",
+      "state": "solid",
+      "density": 534,
+      "conductivity": 84.8,
+      "heat_capacity": 3582,
+      "colors": ["#cfcfd6", "#dadae0", "#c3c3cb"],
+      "melt": {"temp": 180.5, "into": "liquid_lithium", "latent": 432000},
+      "acid_resistance": 0.0,
+      "nuclear": {"absorb": 0.9},
+      "desc": "Литий — самый лёгкий металл, плавает даже на масле и спокойно шипит в воде."
+    },
+    {
+      "id": "liquid_lithium",
+      "name": "Жидкий литий",
+      "category": "metal",
+      "state": "liquid",
+      "density": 527.6,
+      "conductivity": 43,
+      "heat_capacity": 4170,
+      "thermal_expansion": 0.00019,
+      "initial_temp": 200.0,
+      "colors": ["#dcdce2", "#e6e6eb", "#d0d0d8"],
+      "viscosity": 0.0,
+      "freeze": {"temp": 180.5, "into": "lithium", "latent": 432000},
+      "acid_resistance": 0.0,
+      "nuclear": {"absorb": 0.9},
+      "desc": "Жидкий литий — теплоноситель-кандидат термоядерных реакторов: из лития-6 нарабатывают тритий."
+    },
+    {
+      "id": "cesium",
+      "name": "Цезий",
+      "category": "metal",
+      "state": "solid",
+      "density": 1930,
+      "conductivity": 35.9,
+      "heat_capacity": 242,
+      "colors": ["#d9c48a", "#e3d098", "#cfb87c"],
+      "melt": {"temp": 28.5, "into": "liquid_cesium", "latent": 15700},
+      "acid_resistance": 0.0,
+      "nuclear": {"absorb": 0.2},
+      "desc": "Цезий плавится при 28,5 °C и взрывается в воде, реагирует даже со льдом при −116 °C."
+    },
+    {
+      "id": "liquid_cesium",
+      "name": "Жидкий цезий",
+      "category": "metal",
+      "state": "liquid",
+      "density": 1848.5,
+      "conductivity": 19.7,
+      "heat_capacity": 236,
+      "thermal_expansion": 0.00035,
+      "initial_temp": 35.0,
+      "colors": ["#e3cf96", "#ecdaa6", "#d8c286"],
+      "viscosity": 0.0,
+      "freeze": {"temp": 28.5, "into": "cesium", "latent": 15700},
+      "acid_resistance": 0.0,
+      "nuclear": {"absorb": 0.2},
+      "desc": "Жидкий цезий золотистый — один из трёх цветных металлов."
+    },
+    {
+      "id": "liquid_oxygen",
+      "name": "Жидкий кислород",
+      "category": "liquid",
+      "state": "liquid",
+      "density": 1141,
+      "conductivity": 0.152,
+      "heat_capacity": 1699,
+      "initial_temp": -185.0,
+      "colors": ["#8fc4f0", "#9ccdf4", "#82b9e8"],
+      "viscosity": 0.0,
+      "boil": {"temp": -183.0, "into": "oxygen", "latent": 213000},
+      "desc": "Жидкий кислород голубой, кипит при −183 °C; пропитанные им горючие взрываются."
+    },
+    {
+      "id": "uf6",
+      "name": "Гексафторид урана",
+      "category": "nuclear",
+      "state": "powder",
+      "density": 5090,
+      "conductivity": 0.2,
+      "heat_capacity": 474,
+      "colors": ["#f1f1ea", "#e6e6dd", "#fafaf4"],
+      "melt": {"temp": 56.5, "into": "uf6_gas", "latent": 136600},
+      "acid_resistance": 0.8,
+      "nuclear": {
+        "fissile": 0.05,
+        "fast_fission": 0.003,
+        "absorb": 0.03,
+        "spontaneous": 0.02,
+        "decay_heat": 0.0001,
+        "fission_energy": 3.0,
+        "neutrons_per_fission": [2, 3]
+      },
+      "wind_coupling": 0.0,
+      "desc": "UF₆ при 56,5 °C возгоняется в тяжёлый газ, на нём обогащают уран в центрифугах."
+    },
+    {
+      "id": "uf6_gas",
+      "name": "Газ UF₆",
+      "category": "nuclear",
+      "state": "gas",
+      "density": 14.6,
+      "conductivity": 0.0067,
+      "heat_capacity": 368,
+      "thermal_expansion": 0.00341,
+      "initial_temp": 60.0,
+      "colors": ["#e6e8d8", "#eef0e2"],
+      "condense": {"temp": 56.5, "into": "uf6", "latent": 136600},
+      "nuclear": {
+        "fissile": 0.0003,
+        "fast_fission": 2e-05,
+        "absorb": 0.0002,
+        "spontaneous": 0.0001,
+        "fission_energy": 3.0,
+        "neutrons_per_fission": [2, 3]
+      },
+      "wind_coupling": 1.0,
+      "gas_alpha": 0.6,
+      "desc": "Газ UF₆ в 12 раз тяжелее воздуха, а с влагой даёт ядовитый фтороводород."
+    },
+    {
+      "id": "glycerin",
+      "name": "Глицерин",
+      "category": "liquid",
+      "state": "liquid",
+      "density": 1261,
+      "conductivity": 0.285,
+      "heat_capacity": 2430,
+      "thermal_expansion": 0.0005,
+      "colors": ["#e4ecef", "#edf3f5", "#d9e3e7"],
+      "viscosity": 0.75,
+      "ignite": {
+        "temp": 370,
+        "into": "fire",
+        "burn_time": [3, 6],
+        "residue": "smoke",
+        "residue_chance": 0.2,
+        "heat": 16000000.0
+      },
+      "acid_resistance": 0.8,
+      "desc": "Глицерин в 1400 раз вязче воды и сладкий на вкус."
+    },
+    {
+      "id": "honey",
+      "name": "Мёд",
+      "category": "liquid",
+      "state": "liquid",
+      "density": 1420,
+      "conductivity": 0.5,
+      "heat_capacity": 2500,
+      "thermal_expansion": 0.0005,
+      "colors": ["#e0a020", "#eab030", "#d49216"],
+      "viscosity": 0.95,
+      "acid_resistance": 0.6,
+      "desc": "Мёд в 10 000 раз вязче воды и почти не портится из-за низкой влажности."
+    },
+    {
+      "id": "sawdust",
+      "name": "Опилки",
+      "category": "powder",
+      "state": "powder",
+      "density": 210,
+      "conductivity": 0.08,
+      "heat_capacity": 1700,
+      "colors": ["#c9a46a", "#d6b37a", "#bc975c"],
+      "ignite": {
+        "temp": 250,
+        "into": "fire",
+        "burn_time": [2, 5],
+        "residue": "ash",
+        "residue_chance": 0.3,
+        "heat": 16000000.0
+      },
+      "acid_resistance": 0.4,
+      "wind_coupling": 0.3,
+      "desc": "Опилки вспыхивают легче цельного дерева, а их пыль в воздухе может взорваться."
+    },
+    {
+      "id": "soot",
+      "name": "Сажа",
+      "category": "powder",
+      "state": "powder",
+      "density": 300,
+      "conductivity": 0.1,
+      "heat_capacity": 710,
+      "colors": ["#1a1a1c", "#222224", "#141416"],
+      "ignite": {
+        "temp": 500,
+        "into": "fire",
+        "burn_time": [3, 6],
+        "residue": "co2",
+        "residue_chance": 0.1,
+        "heat": 32800000.0
+      },
+      "acid_resistance": 0.9,
+      "wind_coupling": 0.6,
+      "desc": "Сажа — почти чистый углерод от неполного сгорания, лёгкая и летучая."
     }
   ]
 }

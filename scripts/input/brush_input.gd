@@ -16,6 +16,8 @@ const TWO_FINGER_TAP_MS := 300
 const TWO_FINGER_TAP_MOVE := 14.0
 const CANCEL_STROKE_MS := 220
 const ZOOM_STEP := 1.15
+const WIND_MAX := 120.0       # клеток/с
+const WIND_GAIN := 1.0
 
 var state: AppState
 var sim: SimWorld
@@ -39,6 +41,8 @@ var _stroke_t0 := 0
 var _last_cell := Vector2i.ZERO
 var _finger_pos := Vector2.ZERO
 var _neutron_acc := 0.0
+var _wind_prev := Vector2.ZERO
+var _wind_vel := Vector2.ZERO
 
 # Пан мышью.
 var _mouse_pan := false
@@ -144,6 +148,9 @@ func _on_key(k: InputEventKey) -> void:
 		state.notify()
 	elif k.keycode == KEY_3 or k.keycode == KEY_KP_3:
 		state.view = 2
+		state.notify()
+	elif k.keycode == KEY_4 or k.keycode == KEY_KP_4:
+		state.view = 3
 		state.notify()
 	elif k.keycode == KEY_C and not k.is_command_or_control_pressed():
 		clear_requested.emit()
@@ -310,6 +317,8 @@ func _begin_stroke(screen_p: Vector2, erase: bool, from_touch: bool, index: int)
 	pointer_valid = true
 	_last_cell = view.screen_to_cell(pointer_pos)
 	_neutron_acc = 0.0
+	_wind_prev = _pointer_cell_f()
+	_wind_vel = Vector2.ZERO
 	_apply_at(_last_cell, _last_cell)
 
 
@@ -366,12 +375,32 @@ func _apply_continuous(delta: float) -> void:
 			sim.heat_circle(c, r, HEAT_WATTS, delta)
 		AppState.Tool.COOL:
 			sim.heat_circle(c, r, -HEAT_WATTS, delta)
+		AppState.Tool.WIND:
+			_apply_wind(delta)
 		AppState.Tool.NEUTRON:
 			_neutron_acc += NEUTRONS_PER_SEC * delta
 			var n := int(_neutron_acc)
 			if n > 0:
 				_neutron_acc -= float(n)
 				sim.spawn_neutrons(c, maxi(r, 1), n)
+
+
+## Ветер: скорость штриха (клеток/с), сглаженная, уходит в add_air_impulse.
+func _apply_wind(delta: float) -> void:
+	var cur := _pointer_cell_f()
+	if delta <= 0.0:
+		return
+	var v := (cur - _wind_prev) / delta
+	_wind_prev = cur
+	_wind_vel = _wind_vel.lerp(v, 0.5)
+	if _wind_vel.length() < 2.0:
+		return
+	var vv := _wind_vel.limit_length(WIND_MAX) * WIND_GAIN
+	sim.add_air_impulse(Vector2i(roundi(cur.x), roundi(cur.y)), maxi(state.brush_radius, 4), vv)
+
+
+func _pointer_cell_f() -> Vector2:
+	return (pointer_pos - view.position) / view.cell_scale()
 
 
 func _update_cursor() -> void:
@@ -390,6 +419,8 @@ func _update_cursor() -> void:
 		col = Color(0.5, 0.8, 1.0, 0.9)
 	elif state.tool == AppState.Tool.NEUTRON:
 		col = Color(0.6, 1.0, 1.0, 0.9)
+	elif state.tool == AppState.Tool.WIND:
+		col = Color(0.75, 0.95, 1.0, 0.9)
 	cursor.set_cursor(pointer_pos, r_px, col, _finger_pos, _stroke and _stroke_touch and state.brush_offset)
 
 

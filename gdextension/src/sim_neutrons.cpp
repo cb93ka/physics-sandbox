@@ -54,20 +54,40 @@ void World::neutron_pass() {
 	for (size_t k = 0; k < n; k++) {
 		Neutron nt = neutrons[k];
 		bool alive = true;
-		const float speed = nt.fast ? FAST_SPEED : THERMAL_SPEED;
-		const int nsub = (int)std::ceil(speed);
-		const float dl = speed / nsub;
-		int px = (int)std::floor(nt.x), py = (int)std::floor(nt.y);
-		for (int s = 0; s < nsub && alive; s++) {
-			nt.x += nt.vx * dl;
-			nt.y += nt.vy * dl;
-			const int cx = (int)std::floor(nt.x), cy = (int)std::floor(nt.y);
-			if (!inb(cx, cy)) {
+		// Exact grid traversal (Amanatides-Woo DDA): every crossed cell is visited, so a rod one
+		// cell thick cannot be skipped even when the neutron flies several cells per step.
+		float remain = nt.fast ? FAST_SPEED : THERMAL_SPEED;
+		int cx = (int)std::floor(nt.x), cy = (int)std::floor(nt.y);
+		int guard = 0;
+		while (remain > 0.0f && alive && guard++ < 64) {
+			const float vx = nt.vx, vy = nt.vy;
+			const float tx = vx > 1e-7f ? (cx + 1 - nt.x) / vx : (vx < -1e-7f ? (nt.x - cx) / -vx : 1e30f);
+			const float ty = vy > 1e-7f ? (cy + 1 - nt.y) / vy : (vy < -1e-7f ? (nt.y - cy) / -vy : 1e30f);
+			const float t = std::max(0.0f, std::min(tx, ty));
+			if (t >= remain) {
+				nt.x += vx * remain;
+				nt.y += vy * remain;
+				break;
+			}
+			remain -= t;
+			int nx = cx, ny = cy;
+			if (tx <= ty) {
+				nx += vx > 0 ? 1 : -1;
+				nt.x = vx > 0 ? nx + 1e-4f : nx + 1 - 1e-4f;
+				nt.y += vy * t;
+			} else {
+				ny += vy > 0 ? 1 : -1;
+				nt.y = vy > 0 ? ny + 1e-4f : ny + 1 - 1e-4f;
+				nt.x += vx * t;
+			}
+			if (!inb(nx, ny)) {
 				alive = false;
 				break;
 			}
-			if (cx == px && cy == py) continue;
-			const int i = cy * W + cx;
+			// keep the secondary coordinate inside the new cell (float drift)
+			nt.x = std::min(std::max(nt.x, nx + 1e-4f), nx + 1 - 1e-4f);
+			nt.y = std::min(std::max(nt.y, ny + 1e-4f), ny + 1 - 1e-4f);
+			const int i = ny * W + nx;
 			flux[i] += 1.0f;
 			const Material &M = mats[mat[i]];
 			if (M.flags & MF_NUCLEAR) {
@@ -75,7 +95,7 @@ void World::neutron_pass() {
 				float r = frand();
 				const float pf = nt.fast ? N.fast_fission : N.fissile;
 				if (r < pf) {
-					fission_at(i, cx, cy, M);
+					fission_at(i, nx, ny, M);
 					alive = false;
 					break;
 				}
@@ -86,30 +106,32 @@ void World::neutron_pass() {
 				}
 				r -= N.absorb;
 				if (r < N.moderate) {
-					// elastic scattering: fast -> thermal, isotropic direction
+					// elastic scattering: fast -> thermal, isotropic direction; energy lost for this step
 					nt.fast = 0;
 					float a = frand() * 6.2831853f;
 					nt.vx = std::cos(a);
 					nt.vy = std::sin(a);
+					nt.x = nx + 0.5f;
+					nt.y = ny + 0.5f;
+					cx = nx;
+					cy = ny;
+					break;
+				}
+				r -= N.moderate;
+				if (r < N.reflect) {
+					// back into the previous cell with some angular spread
+					float a = (frand() - 0.5f) * 1.2f;
+					float ca = std::cos(a), sa = std::sin(a);
+					float rvx = -vx, rvy = -vy;
+					nt.vx = rvx * ca - rvy * sa;
+					nt.vy = rvx * sa + rvy * ca;
 					nt.x = cx + 0.5f;
 					nt.y = cy + 0.5f;
-					s = nsub; // energy lost: the rest of this step is gone
-				} else {
-					r -= N.moderate;
-					if (r < N.reflect) {
-						float a = (frand() - 0.5f) * 1.2f; // reflect back with spread
-						float ca = std::cos(a), sa = std::sin(a);
-						float vx = -nt.vx, vy = -nt.vy;
-						nt.vx = vx * ca - vy * sa;
-						nt.vy = vx * sa + vy * ca;
-						nt.x = px + 0.5f;
-						nt.y = py + 0.5f;
-						continue; // stay in previous cell
-					}
+					continue;
 				}
 			}
-			px = cx;
-			py = cy;
+			cx = nx;
+			cy = ny;
 		}
 		if (!alive) continue;
 		nt.age += dt;

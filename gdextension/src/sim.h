@@ -29,8 +29,11 @@ enum : uint32_t {
 	MF_FIXED = 1u << 7,
 	MF_NUCLEAR = 1u << 8, // interacts with neutrons
 	MF_METAL = 1u << 9, // category "metal": survives explosions
+	MF_EMIT = 1u << 10, // source: emits a material into neighbouring air
+	MF_DRAIN = 1u << 11, // sink: deletes neighbouring non-solid cells
+	MF_FAN = 1u << 12, // blows the air field
 };
-constexpr uint32_t MF_SPECIAL = MF_IGNITE | MF_EXPLOSIVE | MF_ACID | MF_NUC_SOURCE | MF_REACT;
+constexpr uint32_t MF_SPECIAL = MF_IGNITE | MF_EXPLOSIVE | MF_ACID | MF_NUC_SOURCE | MF_REACT | MF_EMIT | MF_DRAIN;
 
 // Cell flags.
 enum : uint8_t {
@@ -78,6 +81,13 @@ struct Material {
 	float acid_resistance = 0;
 	Nuclear nuc;
 	float fixed_temp = 0;
+	// v0.1.1
+	float wind_coupling = 0; // 1 for gases and fire by default
+	float gas_alpha = 1; // render opacity (0..1)
+	int emit_into = 0;
+	float emit_rate = 0, emit_temp = NAN; // NAN: initial_temp of emit_into
+	float drain_rate = 0;
+	float fan_dx = 0, fan_dy = 0, fan_strength = 0;
 
 	// derived
 	uint32_t flags = 0;
@@ -118,6 +128,7 @@ struct Chunk {
 constexpr int CHUNK = 64;
 constexpr int CHUNK_SHIFT = 6;
 constexpr int MAX_NEUTRONS = 20000;
+constexpr int AIR_SCALE = 4; // one air-field cell covers 4x4 world cells
 constexpr int CALM_LIMIT = 240; // steps of pure surface levelling before a chunk may sleep
 constexpr float FIXED_DT = 1.0f / 60.0f;
 constexpr float MIN_TEMP = -273.15f;
@@ -145,6 +156,8 @@ public:
 
 	// ---------------- stats ----------------
 	double step_ms = 0.0;
+	int heat_substeps = 0, heat_chunks = 0, stiff_mat = -1;
+	double pass_ms[6] = {}; // move, air, wind, special, neutrons, heat
 	int active_chunks = 0;
 	float fissions_per_sec = 0.0f;
 	float max_temp = 20.0f;
@@ -165,6 +178,17 @@ public:
 	void spawn_neutrons(int cx, int cy, int r, int count);
 
 	void render(int view, uint8_t *out); // W*H*4 RGBA8
+	void render_air(int view, uint8_t *out); // AW*AH*4 RGBA8
+
+	// ---------------- air field (stable fluids on a coarse grid) ----------------
+	bool air_enabled = true;
+	int AW = 0, AH = 0;
+	std::vector<float> au, av; // velocity, world cells per second
+	std::vector<float> atemp; // mean temperature of the gas in the air cell
+	void air_impulse(int cx, int cy, int r, float vx, float vy);
+	void air_explosion(int cx, int cy, int radius, float energy_j);
+	void set_air_enabled(bool on);
+	void prepare_render_tables();
 
 	// helpers usable from the glue
 	void set_cell(int i, int m, float t);
@@ -198,12 +222,32 @@ private:
 
 	// heat tables (only rows/cols of present materials are valid)
 	std::vector<float> F_raw; // harmonic k * dx  (W/K), 256*256
-	std::vector<float> F_eff; // per-substep conductance*dt (J/K), clamped
+	std::vector<float> F_eff; // full-step conductance*dt (J/K), clamped; -1 = stiff pair
+	std::vector<float> F_sub; // per-substep conductance*dt for stiff pairs
+	std::vector<int> stiff_list; // cell*2 + (0 right, 1 down)
 	std::vector<float> inv_C; // per material
 	std::vector<uint8_t> present;
 	std::vector<int> active_list;
 	std::vector<int> scratch_offsets; // for explosions
 	std::vector<Neutron> new_neutrons;
+
+	// air field internals
+	std::vector<float> au0, av0, ap, ap0, adiv, asrc, atemp0, ablur, atmp, afx, afy, awt;
+	std::vector<uint8_t> asolid, acount, atotal, afan;
+	bool air_quiet = true;
+	void air_setup();
+	void air_step();
+	void wind_pass();
+	inline float air_sample(const std::vector<float> &f, float x, float y) const;
+	uint8_t wind_stamp = 2;
+
+	// render tables
+	bool tables_ready = false;
+	uint32_t base_rgba[256][32];
+	uint8_t thermal_lut[3400][3];
+	uint8_t bb_lut[3100][3];
+	uint8_t flux_lut[1024];
+	uint8_t speed_lut[1024][4];
 
 	// passes
 	void move_pass();

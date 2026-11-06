@@ -5,12 +5,15 @@ extends Node
 ##   --demo                       автосценарий: насыпать песок и налить воду
 ##   --demo-screenshot=<путь.png> то же + сохранить скриншот и выйти
 ##   --demo-frames=<N>            сколько кадров ждать до снимка (по умолчанию 600)
+##   --demo-rods-in               демо-реактор с 3 стержнями карбида бора в зоне (гасят реакцию)
 ##   --demo-heat3                 включить «Разогрев ×3»
-##   --demo-view=<0|1|2>          вид на снимке
+##   --demo-view=<0|1|2|3>        вид на снимке (3 — потоки воздуха)
 ##   --demo-modal=<saves|settings|clear>  открыть окно перед снимком
 ##   --demo-drawer=<open|closed>  шторка материалов на снимке
+##   --demo-tab=<id категории>    открыть вкладку шторки (например special)
 ##   --ui-scale=<k>               масштаб интерфейса (на телефоне считается сам)
 ##   --safe-sim                   изобразить вырез iPhone (отступы безопасной зоны)
+##   --mock                       принудительно GDScript-заглушка ядра
 ##   --touch-debug                мышь рисует через эмулированный тач (проверка жестов)
 
 const GRID_HEIGHT := 180
@@ -24,6 +27,8 @@ var palette: Array[Dictionary] = []
 var undo := UndoStack.new(UNDO_LIMIT)
 
 var world_view: WorldView
+var tracers: AirTracers
+var _bg: ColorRect
 var cursor: BrushCursor
 var hud: Hud
 var input: BrushInput
@@ -35,6 +40,7 @@ var _demo_frames := 180
 var _demo_shot := ""
 var _demo_reactor_core := Vector2i.ZERO
 var _demo_probe := Vector2i.ZERO
+var _demo_fire := Vector2i.ZERO
 var _last_max_temp := 20.0
 var _haptic_cooldown := 0.0
 var _gravity_sent := Vector2(0, 1)
@@ -47,7 +53,7 @@ func _ready() -> void:
 	_apply_ui_scale(float(_args.get("ui-scale", "0")))
 	state.load_settings()
 
-	sim = SimWorld.new()
+	sim = SimWorld.new(_args.has("mock"))
 	loader.load_all()
 	if not loader.apply_to(sim):
 		push_error("Не удалось загрузить материалы в ядро")
@@ -89,6 +95,7 @@ func _ready() -> void:
 		w, GRID_HEIGHT, palette.size(), "SandWorld" if sim.is_native else "заглушка",
 		" (встроенный набор)" if loader.from_builtin else ""])
 
+	_build_background()
 	world_view = WorldView.new()
 	world_view.name = "WorldView"
 	add_child(world_view)
@@ -96,6 +103,11 @@ func _ready() -> void:
 	world_view.set_area(hud.world_area(), false)
 	world_view.setup(sim)
 	hud.world_area_changed.connect(func(r: Rect2) -> void: world_view.set_area(r))
+	tracers = AirTracers.new()
+	tracers.name = "AirTracers"
+	add_child(tracers)
+	move_child(tracers, world_view.get_index() + 1)
+	tracers.setup(sim, world_view)
 
 	var cursor_layer := CanvasLayer.new()
 	cursor_layer.layer = 1
@@ -160,6 +172,8 @@ func _on_state_changed() -> void:
 	if not state.tilt_gravity and _gravity_sent != Vector2(0, 1):
 		_gravity_sent = Vector2(0, 1)
 		sim.set_gravity(_gravity_sent)
+	if tracers != null:
+		tracers.set_active(state.view == 3)
 	hud.sync()
 	_settings_dirty = true
 	_settings_timer = 1.0
@@ -252,6 +266,30 @@ func _update_tilt() -> void:
 # Запуск
 # =========================================================================
 
+## Гладкий фон за миром (шейдер), в полном разрешении экрана.
+func _build_background() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = -1
+	add_child(layer)
+	_bg = ColorRect.new()
+	_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://assets/shaders/background.gdshader") as Shader
+	_bg.material = mat
+	layer.add_child(_bg)
+	get_viewport().size_changed.connect(_update_background)
+	_update_background()
+
+
+func _update_background() -> void:
+	var logical := get_viewport().get_visible_rect().size
+	var win := Vector2(DisplayServer.window_get_size())
+	var mat := _bg.material as ShaderMaterial
+	mat.set_shader_parameter("size_px", logical)
+	mat.set_shader_parameter("px_scale", win.y / maxf(logical.y, 1.0) if win.y > 0.0 else 1.0)
+
+
 func _default_material() -> int:
 	var sand := sim.find_material("sand")
 	if sand > 0:
@@ -304,6 +342,9 @@ func _demo_tick() -> void:
 	if _demo_frame > 2 and _demo_frame < int(_demo_frames * 0.4):
 		# Струя песка в центре.
 		sim.paint_circle(Vector2i(roundi(w * 0.36), 6), 1, _mat("sand"), 0)
+	if _demo_frame > 3 and _demo_frame < int(_demo_frames * 0.6) and _demo_frame % 4 == 0 and _mat("fire") > 0:
+		# Поджигаем дрова: огонь только в пустоту над поленницей.
+		sim.paint_circle(_demo_fire, 3, _mat("fire"), 0)
 	if _demo_frame == 5 or (_demo_frame < int(_demo_frames * 0.5) and _demo_frame % 30 == 0):
 		# Затравочные нейтроны в реактор.
 		sim.spawn_neutrons(_demo_reactor_core, 3, 30 if _demo_frame == 5 else 8)
@@ -321,11 +362,13 @@ func _demo_tick() -> void:
 ## Демо-стенд: слева «кастрюля» на нагревателе, в центре песок и стакан с маслом
 ## под водой (масло всплывает), справа маленький реактор в графите.
 func _demo_build(w: int, h: int) -> void:
-	state.view = clampi(int(_args.get("demo-view", "0")), 0, 2)
+	state.view = clampi(int(_args.get("demo-view", "0")), 0, 3)
 	state.material = _mat("water")
 	for k: String in ["uranium235", "boron_carbide", "graphite", "steel", "water", "sand"]:
 		state.push_recent(k)
 	state.notify()
+	if _args.has("demo-tab"):
+		hud.drawer.select_tab(str(_args["demo-tab"]))
 	var wall := _mat("wall") if _mat("wall") > 0 else _mat("stone")
 	var steel := _mat("steel")
 	var water := _mat("water")
@@ -356,6 +399,16 @@ func _demo_build(w: int, h: int) -> void:
 	_rect(gx - 18, h - 26, gx + 18, h - 6, _mat("oil"))
 	_rect(gx - 18, h - 54, gx + 18, h - 27, water)
 
+	# Костёр между песком и стаканом; вентилятор справа от него дует влево —
+	# дым уходит в сторону от реактора.
+	var fx := sx + 22
+	_rect(fx, h - 6, fx + 13, h - 4, _mat("wood"))
+	_rect(fx + 2, h - 8, fx + 11, h - 7, _mat("wood"))
+	_demo_fire = Vector2i(fx + 7, h - 10)
+	var fan := sim.find_material("fan_left")
+	if fan > 0 and fx + 19 < gx - 21:
+		_rect(fx + 17, h - 16, fx + 19, h - 4, fan)
+
 	# Реактор: графитовая рамка, вода-замедлитель, блок U-235 10×8 с водяными
 	# прослойками и два стержня карбида бора по бокам.
 	var rx := w - roundi(w * 0.14)
@@ -367,9 +420,12 @@ func _demo_build(w: int, h: int) -> void:
 	var yb := h - 38
 	for layer in 3:
 		_rect(rx - 5, yb + layer * 3, rx + 4, yb + layer * 3 + 1, u)
-	var boron := _mat("boron_carbide")
-	_rect(rx - 16, h - 50, rx - 14, h - 24, boron)
-	_rect(rx + 14, h - 50, rx + 16, h - 24, boron)
+	# По умолчанию стержни подняты — реактор разгоняется и греет воду.
+	# --demo-rods-in — три стержня карбида бора в зоне, реакция затухает.
+	if _args.has("demo-rods-in"):
+		var boron := _mat("boron_carbide")
+		for bx: int in [rx - 6, rx, rx + 5]:
+			_rect(bx, yb - 2, bx, yb + 9, boron)
 	_demo_reactor_core = Vector2i(rx, yb + 4)
 
 

@@ -104,7 +104,7 @@ func set_open(v: bool) -> void:
 func sync() -> void:
 	var e := entry_for(state.material)
 	_chip.text = str(e.get("name", "—"))
-	_chip.icon = PixelIcons.swatch(e.get("color", Color.BLACK), 18)
+	_chip.icon = PixelIcons.swatch(e.get("color", Color.BLACK), 18, MaterialButton.fan_dir(str(e.get("key", ""))))
 	_replace.set_pressed_no_signal(state.replace_mode)
 	_slider.set_value_no_signal(state.brush_radius)
 	_size_label.text = str(state.brush_radius + 1)
@@ -178,6 +178,12 @@ func _on_tab(id: String) -> void:
 	_select_tab(id)
 	if not is_open:
 		set_open(true)
+
+
+## Открыть вкладку категории по id (для демо и сценариев).
+func select_tab(id: String) -> void:
+	if _tab_buttons.has(id):
+		_select_tab(id)
 
 
 func _select_tab(id: String) -> void:

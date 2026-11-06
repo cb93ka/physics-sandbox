@@ -8,6 +8,7 @@ const TOOLS: Array[Dictionary] = [
 	{"tool": AppState.Tool.HEAT, "icon": "heat", "tip": "Нагрев"},
 	{"tool": AppState.Tool.COOL, "icon": "cool", "tip": "Охлаждение"},
 	{"tool": AppState.Tool.NEUTRON, "icon": "neutron", "tip": "Источник нейтронов"},
+	{"tool": AppState.Tool.WIND, "icon": "wind", "tip": "Ветер: дует по направлению штриха"},
 ]
 
 var state: AppState

@@ -151,6 +151,7 @@ func setup(width: int, height: int) -> void:
 	for i in n:
 		_write_color(i, 0)
 	_n_pos.clear(); _n_vel.clear(); _n_life.clear()
+	_air_setup()
 
 
 func get_width() -> int:
@@ -313,22 +314,25 @@ func get_color_buffer(view: int) -> PackedByteArray:
 		buf = PackedByteArray()
 		buf.resize(_w * _h * 4)
 		for i in _w * _h:
+			if _state[_mat[i]] == St.EMPTY:
+				continue  # air прозрачный: его температура — в get_air_layer(1)
 			var col := _thermal_color(_temp[i])
 			var o := i * 4
 			buf[o] = col.r8; buf[o + 1] = col.g8; buf[o + 2] = col.b8; buf[o + 3] = 255
 		return buf
 	buf = _rgba.duplicate()
-	if view == 2:
+	if view == 2 or view == 3:
+		var sh := 2 if view == 2 else 1
 		for o in range(0, buf.size(), 4):
-			buf[o] = buf[o] >> 2
-			buf[o + 1] = buf[o + 1] >> 2
-			buf[o + 2] = buf[o + 2] >> 2
+			buf[o] = buf[o] >> sh
+			buf[o + 1] = buf[o + 1] >> sh
+			buf[o + 2] = buf[o + 2] >> sh
 	for p in _n_pos:
 		var x := int(p.x)
 		var y := int(p.y)
 		if x >= 0 and y >= 0 and x < _w and y < _h:
 			var o := (y * _w + x) * 4
-			buf[o] = 170; buf[o + 1] = 255; buf[o + 2] = 255
+			buf[o] = 170; buf[o + 1] = 255; buf[o + 2] = 255; buf[o + 3] = 255
 	return buf
 
 
@@ -428,7 +432,10 @@ func _write_color(i: int, m: int) -> void:
 	var pal := _palette[m]
 	var k := (_rng.randi() % (pal.size() / 4)) * 4
 	var o := i * 4
-	_rgba[o] = pal[k]; _rgba[o + 1] = pal[k + 1]; _rgba[o + 2] = pal[k + 2]; _rgba[o + 3] = 255
+	_rgba[o] = pal[k]; _rgba[o + 1] = pal[k + 1]; _rgba[o + 2] = pal[k + 2]
+	# v0.1.1: air прозрачный, газы полупрозрачные.
+	var st := _state[m]
+	_rgba[o + 3] = 0 if st == St.EMPTY else (130 if st == St.GAS else (210 if st == St.FIRE else 255))
 
 
 func _set_cell(i: int, m: int, t: float) -> void:
@@ -450,7 +457,7 @@ func _swap(i: int, j: int) -> void:
 	var l := _life[i]; _life[i] = _life[j]; _life[j] = l
 	var oi := i * 4
 	var oj := j * 4
-	for k in 3:
+	for k in 4:
 		var c := _rgba[oi + k]; _rgba[oi + k] = _rgba[oj + k]; _rgba[oj + k] = c
 	_stamp[i] = _step_no
 	_stamp[j] = _step_no
@@ -482,6 +489,7 @@ func _do_step() -> void:
 	_step_no += 1
 	_move_pass()
 	_heat_pass()
+	_air_pass()
 	_neutron_pass()
 	_fission_timer += FIXED_DT
 	if _fission_timer >= 1.0:
@@ -693,6 +701,186 @@ static func _thermal_color(t: float) -> Color:
 	if a >= stops.size() - 1:
 		return stops[stops.size() - 1]
 	return stops[a].lerp(stops[a + 1], f - float(a))
+
+
+# =========================================================================
+# Поле воздуха (v0.1.1): грубая сетка 4×4, плавучесть, адвекция, проекция.
+# Очень упрощённо — только чтобы фронт было на чём проверить.
+# =========================================================================
+
+const AIR_SCALE := 4
+var _gw := 0
+var _gh := 0
+var _vx := PackedFloat32Array()
+var _vy := PackedFloat32Array()
+var _air_t := PackedFloat32Array()
+var _air_solid := PackedByteArray()
+var _air_on := true
+var _air_tick := 0
+
+
+func _air_setup() -> void:
+	_gw = int(ceilf(float(_w) / AIR_SCALE))
+	_gh = int(ceilf(float(_h) / AIR_SCALE))
+	var n := _gw * _gh
+	_vx = PackedFloat32Array(); _vx.resize(n)
+	_vy = PackedFloat32Array(); _vy.resize(n)
+	_air_t = PackedFloat32Array(); _air_t.resize(n); _air_t.fill(_ambient)
+	_air_solid = PackedByteArray(); _air_solid.resize(n)
+
+
+func get_air_grid_size() -> Vector2i:
+	return Vector2i(_gw, _gh)
+
+
+func get_air_cell_scale() -> int:
+	return AIR_SCALE
+
+
+func get_air_velocity() -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(_gw * _gh * 2)
+	for i in _gw * _gh:
+		out[i * 2] = _vx[i]
+		out[i * 2 + 1] = _vy[i]
+	return out
+
+
+func add_air_impulse(c: Vector2i, r: int, v: Vector2) -> void:
+	var gc := Vector2(c) / AIR_SCALE
+	var gr := maxf(1.0, float(r) / AIR_SCALE)
+	for gy in range(maxi(0, int(gc.y - gr)), mini(_gh, int(gc.y + gr) + 1)):
+		for gx in range(maxi(0, int(gc.x - gr)), mini(_gw, int(gc.x + gr) + 1)):
+			var d := Vector2(gx, gy).distance_to(gc)
+			if d > gr:
+				continue
+			var k := 1.0 - d / (gr + 1.0)
+			var i := gy * _gw + gx
+			_vx[i] = lerpf(_vx[i], v.x, k * 0.6)
+			_vy[i] = lerpf(_vy[i], v.y, k * 0.6)
+
+
+func set_air_enabled(on: bool) -> void:
+	_air_on = on
+
+
+func get_air_layer(view: int) -> PackedByteArray:
+	var buf := PackedByteArray()
+	buf.resize(_gw * _gh * 4)
+	for i in _gw * _gh:
+		if _air_solid[i] != 0:
+			continue
+		var o := i * 4
+		var t := _air_t[i]
+		if view == 0:
+			var a := clampf((t - _ambient) / 200.0, 0.0, 0.25)
+			buf[o] = 255; buf[o + 1] = 170; buf[o + 2] = 110; buf[o + 3] = int(a * 255.0)
+		elif view == 1:
+			var col := _thermal_color(t)
+			buf[o] = col.r8; buf[o + 1] = col.g8; buf[o + 2] = col.b8; buf[o + 3] = 255
+		elif view == 3:
+			var sp := clampf(Vector2(_vx[i], _vy[i]).length() / 40.0, 0.0, 1.0)
+			var col := Color(0.05, 0.1, 0.35).lerp(Color(0.2, 0.9, 0.9), minf(sp * 2.0, 1.0))
+			if sp > 0.5:
+				col = col.lerp(Color.WHITE, (sp - 0.5) * 2.0)
+			buf[o] = col.r8; buf[o + 1] = col.g8; buf[o + 2] = col.b8
+			buf[o + 3] = int(lerpf(0.15, 0.8, sp) * 255.0)
+	return buf
+
+
+func _air_sample(f: PackedFloat32Array, x: float, y: float) -> float:
+	x = clampf(x, 0.0, float(_gw) - 1.001)
+	y = clampf(y, 0.0, float(_gh) - 1.001)
+	var x0 := int(x)
+	var y0 := int(y)
+	var fx := x - float(x0)
+	var fy := y - float(y0)
+	var i := y0 * _gw + x0
+	var a := lerpf(f[i], f[i + 1], fx)
+	var b := lerpf(f[i + _gw], f[i + _gw + 1], fx)
+	return lerpf(a, b, fy)
+
+
+func _air_pass() -> void:
+	if not _air_on or _gw < 3 or _gh < 3:
+		return
+	_air_tick += 1
+	var dt := FIXED_DT
+	# 1. Температура и препятствия — по центральной клетке блока 4×4.
+	var mean := 0.0
+	var nf := 0
+	for gy in _gh:
+		var y := mini(_h - 1, gy * AIR_SCALE + 2)
+		for gx in _gw:
+			var x := mini(_w - 1, gx * AIR_SCALE + 2)
+			var i := gy * _gw + gx
+			var ci := y * _w + x
+			var st := _state[_mat[ci]]
+			var fluid := st == St.EMPTY or st == St.GAS or st == St.FIRE
+			_air_solid[i] = 0 if fluid else 1
+			# Воздух берёт температуру клетки под собой (и от соседних горячих тел).
+			var t := _temp[ci]
+			_air_t[i] = lerpf(_air_t[i], t, 0.2)
+			if fluid:
+				mean += _air_t[i]
+				nf += 1
+	mean = mean / maxf(1.0, float(nf))
+	# 2. Плавучесть: тёплое вверх, силы умеренные.
+	for i in _gw * _gh:
+		if _air_solid[i] != 0:
+			_vx[i] = 0.0
+			_vy[i] = 0.0
+			continue
+		var t := _air_t[i]
+		var dtm := t - maxf(mean, _ambient)
+		if dtm > 1.0:
+			_vy[i] -= 1500.0 * dtm / (t + 273.0) * dt
+		_vx[i] *= 0.98
+		_vy[i] *= 0.98
+	# 3. Адвекция (полулагранжево).
+	var nvx := _vx.duplicate()
+	var nvy := _vy.duplicate()
+	var k := dt / AIR_SCALE
+	for gy in _gh:
+		for gx in _gw:
+			var i := gy * _gw + gx
+			if _air_solid[i] != 0:
+				continue
+			var px := float(gx) - _vx[i] * k
+			var py := float(gy) - _vy[i] * k
+			nvx[i] = _air_sample(_vx, px, py)
+			nvy[i] = _air_sample(_vy, px, py)
+	_vx = nvx
+	_vy = nvy
+	# 4. Проекция давления (Якоби), через шаг.
+	if _air_tick % 2 == 0:
+		_air_project(8)
+
+
+func _air_project(iters: int) -> void:
+	var n := _gw * _gh
+	var div := PackedFloat32Array(); div.resize(n)
+	var p := PackedFloat32Array(); p.resize(n)
+	for gy in range(1, _gh - 1):
+		for gx in range(1, _gw - 1):
+			var i := gy * _gw + gx
+			div[i] = -0.5 * (_vx[i + 1] - _vx[i - 1] + _vy[i + _gw] - _vy[i - _gw])
+	for it in iters:
+		var np := p.duplicate()
+		for gy in range(1, _gh - 1):
+			for gx in range(1, _gw - 1):
+				var i := gy * _gw + gx
+				if _air_solid[i] != 0:
+					continue
+				np[i] = (div[i] + p[i - 1] + p[i + 1] + p[i - _gw] + p[i + _gw]) * 0.25
+		p = np
+	for gy in range(1, _gh - 1):
+		for gx in range(1, _gw - 1):
+			var i := gy * _gw + gx
+			if _air_solid[i] != 0:
+				continue
+			_vx[i] -= 0.5 * (p[i + 1] - p[i - 1])
+			_vy[i] -= 0.5 * (p[i + _gw] - p[i - _gw])
 
 
 # =========================================================================

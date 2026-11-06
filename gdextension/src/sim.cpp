@@ -37,6 +37,7 @@ void World::finalize_materials() {
 	const int n = (int)mats.size();
 	F_raw.assign(256 * 256, 0.0f);
 	F_eff.assign(256 * 256, 0.0f);
+	F_sub.assign(256 * 256, 0.0f);
 	inv_C.assign(256, 0.0f);
 	present.assign(256, 0);
 	for (int a = 0; a < n; a++) {
@@ -49,6 +50,7 @@ void World::finalize_materials() {
 		}
 	}
 	rx_table.assign(256 * 256, 0);
+	tables_ready = false;
 	new_neutrons.reserve(4096);
 	scratch_offsets.reserve(4096);
 }
@@ -99,7 +101,9 @@ void World::setup(int w, int h) {
 	neutrons.clear();
 	neutrons.reserve(MAX_NEUTRONS);
 	active_list.reserve(chunks.size());
+	stiff_list.reserve((size_t)W * H);
 	recount();
+	air_setup();
 	memset(fission_ring, 0, sizeof(fission_ring));
 	fission_sum = 0;
 	fissions_per_sec = 0;
@@ -171,7 +175,7 @@ void World::set_cell(int i, int m, float t) {
 	cflags[i] = 0;
 }
 
-inline void World::swap_cells(int i, int j) {
+void World::swap_cells(int i, int j) {
 	std::swap(mat[i], mat[j]);
 	std::swap(temp[i], temp[j]);
 	std::swap(phase[i], phase[j]);
@@ -281,8 +285,10 @@ void World::spawn_neutrons(int cx, int cy, int r, int count) {
 void World::step_once() {
 	if (W == 0 || mats.empty()) return;
 	auto t0 = std::chrono::steady_clock::now();
-	stamp = (uint8_t)(stamp + 1);
-	if (stamp == 0) stamp = 1;
+	// odd stamps for the movement pass, stamp+1 (even, never 0) for the wind pass
+	stamp = (uint8_t)(stamp + 2);
+	if (stamp == 255 || stamp == 0) stamp = 1;
+	wind_stamp = (uint8_t)(stamp + 1);
 	step_counter++;
 	fissions_this_step = 0;
 
@@ -301,10 +307,27 @@ void World::step_once() {
 		if (c.x0 <= c.x1) active_chunks++;
 	}
 
+	auto tick = [](std::chrono::steady_clock::time_point &t) {
+		auto n = std::chrono::steady_clock::now();
+		double ms = std::chrono::duration<double, std::milli>(n - t).count();
+		t = n;
+		return ms;
+	};
+	auto tp = t0;
+	double pm[6];
 	move_pass();
+	pm[0] = tick(tp);
+	air_step();
+	pm[1] = tick(tp);
+	wind_pass();
+	pm[2] = tick(tp);
 	special_pass();
+	pm[3] = tick(tp);
 	neutron_pass();
+	pm[4] = tick(tp);
 	heat_pass();
+	pm[5] = tick(tp);
+	for (int k = 0; k < 6; k++) pass_ms[k] = step_counter <= 1 ? pm[k] : pass_ms[k] * 0.9 + pm[k] * 0.1;
 
 	// neutron flux map (view 2) decays
 	{
@@ -418,6 +441,8 @@ bool World::try_move(int i, int x, int y, int nx, int ny, int /*mode*/) {
 	const Material &A = mats[mi], &B = mats[mj];
 	if (B.state == ST_SOLID) return false;
 	if (B.state == ST_POWDER && A.state == ST_POWDER) return false;
+	// same liquid: only a colder (denser) cell can sink into a warmer one; cheap reject first
+	if (mi == mj && temp[i] > temp[j] - 0.05f) return false;
 	float p = enter_prob_impl(A, B, mi, mj, dens(i), dens(j));
 	if (p <= 0.0f) return false;
 	if (p < 1.0f && frand() >= p) {
@@ -641,6 +666,7 @@ void World::explode(int cx, int cy, int radius, float energy_j, int into) {
 			scratch_offsets.push_back((d2 << 16) | ((dy + 128) << 8) | (dx + 128));
 		}
 	std::sort(scratch_offsets.begin(), scratch_offsets.end(), [](int a, int b) { return a > b; });
+	air_explosion(cx, cy, R, energy_j * heat_multiplier);
 	// energy weights: w = 1 - d/R, sum approx pi R^2 / 3
 	const float wsum = 3.14159f * R * R / 3.0f + 1.0f;
 	const float e_total = energy_j * heat_multiplier;
@@ -783,6 +809,46 @@ void World::special_pass() {
 			}
 		}
 
+		// ---- sources and sinks ----
+		if (f & MF_EMIT) {
+			float p = M.emit_rate * dt;
+			const Material &E = mats[M.emit_into];
+			const float et = !std::isnan(M.emit_temp) ? M.emit_temp : (std::isnan(E.initial_temp) ? ambient : E.initial_temp);
+			for (; p > 0.0f; p -= 1.0f) {
+				if (p < 1.0f && frand() >= p) break;
+				// prefer the cell "below" for liquids/powders, "above" for gases; then the rest
+				const int pref = (E.state == ST_GAS || E.state == ST_FIRE) ? ring(grav_dir + 4) : grav_dir;
+				const int r0 = (int)(rnd() & 7);
+				for (int q = -1; q < 8; q++) {
+					const int dd = q < 0 ? pref : ring(r0 + q);
+					const int nx = x + RX[dd], ny = y + RY[dd];
+					if (!inb(nx, ny)) continue;
+					const int j = ny * W + nx;
+					if (mat[j] != 0) continue;
+					set_cell(j, M.emit_into, et);
+					wake(nx, ny);
+					break;
+				}
+			}
+		}
+		if (f & MF_DRAIN) {
+			float p = M.drain_rate * dt;
+			for (; p > 0.0f; p -= 1.0f) {
+				if (p < 1.0f && frand() >= p) break;
+				const int r0 = (int)(rnd() & 7);
+				for (int q = 0; q < 8; q++) {
+					const int dd = ring(r0 + q);
+					const int nx = x + RX[dd], ny = y + RY[dd];
+					if (!inb(nx, ny)) continue;
+					const int j = ny * W + nx;
+					if (mat[j] == 0 || mats[mat[j]].state == ST_SOLID) continue;
+					set_cell(j, 0, ambient);
+					wake(nx, ny);
+					break;
+				}
+			}
+		}
+
 		// ---- radioactive sources ----
 		if (f & MF_NUC_SOURCE) {
 			if (M.nuc.decay_heat > 0.0f) add_heat(i, M.nuc.decay_heat * dt_th);
@@ -844,28 +910,44 @@ void World::heat_pass() {
 	for (int m = 0; m < nm; m++)
 		if (m == 0 || mat_count[m] > 0) pl[np++] = m;
 
-	// substeps from the stiffest present pair
+	// Multi-rate explicit scheme. A pair whose relaxation coefficient over the whole step is
+	// <= 0.2 (water, sand, stone, air ...) is exchanged once with the full dt. Stiff pairs (metals,
+	// graphite, flames and gases with tiny heat capacity) get nsub substeps, at most 8; past that
+	// their conductance is clamped to 0.2*min(C) per substep. Every exchange is pairwise, so energy
+	// is conserved, and every coefficient stays <= 0.2, so it is stable.
 	float cmax = 0.0f;
+	stiff_mat = -1;
 	for (int a = 0; a < np; a++) {
 		const int ma = pl[a];
 		if (inv_C[ma] == 0.0f) continue;
 		for (int b = 0; b < np; b++) {
 			float c = F_raw[ma * 256 + pl[b]] * dt_th * inv_C[ma];
-			if (c > cmax) cmax = c;
+			if (c > cmax) {
+				cmax = c;
+				stiff_mat = ma;
+			}
 		}
 	}
 	int nsub = (int)std::ceil(cmax / 0.2f);
 	nsub = std::min(std::max(nsub, 1), 8);
 	const float dts = dt_th / nsub;
+	heat_substeps = nsub;
 	for (int a = 0; a < np; a++) {
 		const int ma = pl[a];
 		for (int b = 0; b < np; b++) {
 			const int mb = pl[b];
-			float g = F_raw[ma * 256 + mb] * dts;
-			float ca = inv_C[ma] > 0 ? mats[ma].cell_C : 1e30f;
-			float cb = inv_C[mb] > 0 ? mats[mb].cell_C : 1e30f;
-			float lim = 0.2f * std::min(ca, cb);
-			F_eff[ma * 256 + mb] = std::min(g, lim);
+			const float fr = F_raw[ma * 256 + mb];
+			const float ca = inv_C[ma] > 0 ? mats[ma].cell_C : 1e30f;
+			const float cb = inv_C[mb] > 0 ? mats[mb].cell_C : 1e30f;
+			const float lim = 0.2f * std::min(ca, cb);
+			const float full = fr * dt_th;
+			if (full <= lim || nsub == 1) {
+				F_eff[ma * 256 + mb] = std::min(full, lim);
+				F_sub[ma * 256 + mb] = 0.0f;
+			} else {
+				F_eff[ma * 256 + mb] = -1.0f; // stiff: handled in the substep loop
+				F_sub[ma * 256 + mb] = std::min(fr * dts, lim);
+			}
 		}
 	}
 
@@ -890,63 +972,82 @@ void World::heat_pass() {
 	float *T = temp.data();
 	const uint8_t *Mt = mat.data();
 	const float *Fe = F_eff.data();
+	const float *Fs = F_sub.data();
 	const float *IC = inv_C.data();
 	const float amb = ambient;
-	for (int s = 0; s < nsub; s++) {
-		for (int c : active_list) {
-			const int cx = c % CW, cy = c / CW;
-			const int x0 = cx * CHUNK, y0 = cy * CHUNK;
-			const int x1 = std::min(W - 1, x0 + CHUNK - 1), y1 = std::min(H - 1, y0 + CHUNK - 1);
-			for (int y = y0; y <= y1; y++) {
-				const int row = y * W;
-				const bool has_down = (y + 1 < H);
-				for (int x = x0; x <= x1; x++) {
-					const int i = row + x;
-					const int ma = Mt[i];
-					const float *Fa = Fe + ma * 256;
-					const float ica = IC[ma];
-					float Ta = T[i];
-					if (x + 1 < W) {
-						const int j = i + 1;
-						const int mb = Mt[j];
-						const float q = Fa[mb] * (T[j] - Ta);
+	stiff_list.clear();
+	// ---- pass A: non-stiff pairs, full step; collect stiff pairs ----
+	for (int c : active_list) {
+		const int cx = c % CW, cy = c / CW;
+		const int x0 = cx * CHUNK, y0 = cy * CHUNK;
+		const int x1 = std::min(W - 1, x0 + CHUNK - 1), y1 = std::min(H - 1, y0 + CHUNK - 1);
+		const int xr = std::min(x1, W - 2); // last x with a right neighbour
+		for (int y = y0; y <= y1; y++) {
+			const int row = y * W;
+			const bool has_down = (y + 1 < H);
+			for (int x = x0; x <= x1; x++) {
+				const int i = row + x;
+				const int ma = Mt[i];
+				const float *Fa = Fe + ma * 256;
+				const float ica = IC[ma];
+				float Ta = T[i];
+				if (x <= xr) {
+					const int mb = Mt[i + 1];
+					const float f = Fa[mb];
+					if (f >= 0.0f) {
+						const float q = f * (T[i + 1] - Ta);
 						Ta += q * ica;
-						T[j] -= q * IC[mb];
+						T[i + 1] -= q * IC[mb];
+					} else {
+						stiff_list.push_back(i * 2);
 					}
-					if (has_down) {
-						const int j = i + W;
-						const int mb = Mt[j];
-						const float q = Fa[mb] * (T[j] - Ta);
-						Ta += q * ica;
-						T[j] -= q * IC[mb];
-					}
-					T[i] = Ta;
 				}
+				if (has_down) {
+					const int mb = Mt[i + W];
+					const float f = Fa[mb];
+					if (f >= 0.0f) {
+						const float q = f * (T[i + W] - Ta);
+						Ta += q * ica;
+						T[i + W] -= q * IC[mb];
+					} else {
+						stiff_list.push_back(i * 2 + 1);
+					}
+				}
+				T[i] = Ta;
 			}
-			// boundary: infinite air at ambient
-			if (x0 == 0)
-				for (int y = y0; y <= y1; y++) {
-					int i = y * W;
-					T[i] += Fe[Mt[i] * 256] * (amb - T[i]) * IC[Mt[i]];
-				}
-			if (x1 == W - 1)
-				for (int y = y0; y <= y1; y++) {
-					int i = y * W + W - 1;
-					T[i] += Fe[Mt[i] * 256] * (amb - T[i]) * IC[Mt[i]];
-				}
-			if (y0 == 0)
-				for (int x = x0; x <= x1; x++) {
-					int i = x;
-					T[i] += Fe[Mt[i] * 256] * (amb - T[i]) * IC[Mt[i]];
-				}
-			if (y1 == H - 1)
-				for (int x = x0; x <= x1; x++) {
-					int i = (H - 1) * W + x;
-					T[i] += Fe[Mt[i] * 256] * (amb - T[i]) * IC[Mt[i]];
-				}
+		}
+		// boundary: infinite air at ambient (clamped full-step exchange)
+		auto edge = [&](int i) {
+			const int m = Mt[i];
+			const float f = Fe[m * 256] >= 0.0f ? Fe[m * 256] : Fs[m * 256] * nsub;
+			const float k = std::min(f * IC[m], 0.2f);
+			T[i] += k * (amb - T[i]);
+		};
+		if (x0 == 0)
+			for (int y = y0; y <= y1; y++) edge(y * W);
+		if (x1 == W - 1)
+			for (int y = y0; y <= y1; y++) edge(y * W + W - 1);
+		if (y0 == 0)
+			for (int x = x0; x <= x1; x++) edge(x);
+		if (y1 == H - 1)
+			for (int x = x0; x <= x1; x++) edge((H - 1) * W + x);
+	}
+	// ---- pass B: stiff pairs, nsub substeps ----
+	const int *sl = stiff_list.data();
+	const size_t ns = stiff_list.size();
+	for (int s = 0; s < nsub && ns; s++) {
+		for (size_t k = 0; k < ns; k++) {
+			const int code = sl[k];
+			const int i = code >> 1;
+			const int j = (code & 1) ? i + W : i + 1;
+			const int ma = Mt[i], mb = Mt[j];
+			const float q = Fs[ma * 256 + mb] * (T[j] - T[i]);
+			T[i] += q * IC[ma];
+			T[j] -= q * IC[mb];
 		}
 	}
 
+	heat_chunks = (int)active_list.size();
 	float tmax = -1e30f;
 	for (int c : active_list) post_heat_chunk(c, tmax);
 	// sleeping chunks keep their last known maximum

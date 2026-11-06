@@ -1,79 +1,443 @@
 {
-  "version": 1,
-  "cell_size_m": 0.01,
-  "ambient_temp": 20.0,
-  "thermal_time_scale": 17.0,
-  "categories": [
-    {"id": "powder", "name": "Сыпучие"},
-    {"id": "liquid", "name": "Жидкости"},
-    {"id": "gas", "name": "Газы"},
-    {"id": "solid", "name": "Твёрдые"},
-    {"id": "metal", "name": "Металлы"},
-    {"id": "nuclear", "name": "Ядерные"},
-    {"id": "energy", "name": "Огонь и взрывчатка"},
-    {"id": "special", "name": "Особые"}
-  ],
-  "materials": [
-    {"id": "air", "name": "Воздух", "category": "special", "state": "empty",
-     "density": 1.204, "conductivity": 0.026, "heat_capacity": 1005, "thermal_expansion": 0.00341,
-     "colors": ["#0d1017"], "hidden": true},
-    {"id": "sand", "name": "Песок", "category": "powder", "state": "powder",
-     "density": 1600, "conductivity": 0.3, "heat_capacity": 830,
-     "colors": ["#d8c27a", "#cfb76c", "#e2cd8a", "#c9ad62"]},
-    {"id": "water", "name": "Вода", "category": "liquid", "state": "liquid",
-     "density": 998, "conductivity": 0.6, "heat_capacity": 4186, "thermal_expansion": 0.0003,
-     "colors": ["#2a6fdb", "#2f78e3"], "viscosity": 0.0,
-     "freeze": {"temp": 0, "into": "ice", "latent": 334000},
-     "boil": {"temp": 100, "into": "steam", "latent": 2257000},
-     "nuclear": {"absorb": 0.01, "moderate": 0.3}},
-    {"id": "steam", "name": "Пар", "category": "gas", "state": "gas",
-     "density": 0.76, "conductivity": 0.025, "heat_capacity": 2010, "thermal_expansion": 0.00341,
-     "initial_temp": 110, "colors": ["#c8d4e0", "#b8c6d4"],
-     "condense": {"temp": 100, "into": "water", "latent": 2257000}},
-    {"id": "ice", "name": "Лёд", "category": "solid", "state": "solid",
-     "density": 917, "conductivity": 2.2, "heat_capacity": 2050, "initial_temp": -10,
-     "colors": ["#a8d8f0", "#b8e2f6"],
-     "melt": {"temp": 0, "into": "water", "latent": 334000}},
-    {"id": "stone", "name": "Камень", "category": "solid", "state": "solid",
-     "density": 2600, "conductivity": 2.5, "heat_capacity": 790,
-     "colors": ["#6b6b70", "#77777c", "#606065"]},
-    {"id": "steel", "name": "Сталь", "category": "metal", "state": "solid",
-     "density": 7850, "conductivity": 45, "heat_capacity": 490, "glow": true,
-     "colors": ["#8d939b", "#979da5"]},
-    {"id": "heater", "name": "Нагреватель", "category": "special", "state": "solid",
-     "density": 7850, "conductivity": 45, "heat_capacity": 490, "fixed_temp": 400, "glow": true,
-     "colors": ["#b0442a", "#a33d25"]},
-    {"id": "wood", "name": "Дерево", "category": "solid", "state": "solid",
-     "density": 700, "conductivity": 0.12, "heat_capacity": 1700,
-     "colors": ["#8a5a2b", "#7d5126", "#93612f"],
-     "ignite": {"temp": 300, "into": "fire", "burn_time": [2, 5], "residue": "ash", "residue_chance": 0.4, "heat": 1.5e7}},
-    {"id": "fire", "name": "Огонь", "category": "energy", "state": "fire",
-     "density": 0.3, "conductivity": 0.05, "heat_capacity": 1100, "initial_temp": 900, "glow": true,
-     "colors": ["#ff9a1f", "#ffcc33", "#ff5a14"], "lifetime": [0.3, 0.9], "decay_into": "smoke", "hidden": true},
-    {"id": "smoke", "name": "Дым", "category": "gas", "state": "gas",
-     "density": 1.1, "conductivity": 0.026, "heat_capacity": 1005,
-     "colors": ["#3c3c40", "#46464b"], "lifetime": [3, 6], "decay_into": "air"},
-    {"id": "ash", "name": "Пепел", "category": "powder", "state": "powder",
-     "density": 600, "conductivity": 0.1, "heat_capacity": 800,
-     "colors": ["#5a5755", "#64615f"]},
-    {"id": "uranium235", "name": "Уран-235", "category": "nuclear", "state": "solid",
-     "density": 19050, "conductivity": 27, "heat_capacity": 116, "glow": true,
-     "colors": ["#4f7a3a", "#5a8742"],
-     "melt": {"temp": 1132, "into": "corium", "latent": 38400},
-     "nuclear": {"fissile": 0.35, "fast_fission": 0.03, "absorb": 0.01, "spontaneous": 0.02,
-                 "decay_heat": 0.02, "fission_energy": 40, "neutrons_per_fission": [2, 3]}},
-    {"id": "corium", "name": "Кориум", "category": "nuclear", "state": "liquid",
-     "density": 9000, "conductivity": 3, "heat_capacity": 500, "viscosity": 0.85, "glow": true,
-     "initial_temp": 1500, "colors": ["#6a4a2a", "#5e4126"],
-     "nuclear": {"fissile": 0.12, "fast_fission": 0.01, "absorb": 0.03, "decay_heat": 0.5,
-                 "fission_energy": 40, "neutrons_per_fission": [2, 3]}},
-    {"id": "graphite", "name": "Графит", "category": "nuclear", "state": "solid",
-     "density": 2200, "conductivity": 120, "heat_capacity": 710,
-     "colors": ["#2b2b2e", "#323236"],
-     "nuclear": {"absorb": 0.0005, "moderate": 0.25, "reflect": 0.15}},
-    {"id": "boron_carbide", "name": "Карбид бора", "category": "nuclear", "state": "solid",
-     "density": 2520, "conductivity": 30, "heat_capacity": 950,
-     "colors": ["#3d3a4a", "#45425a"],
-     "nuclear": {"absorb": 0.8}}
-  ]
+ "version": 1,
+ "cell_size_m": 0.01,
+ "ambient_temp": 20.0,
+ "thermal_time_scale": 17.0,
+ "categories": [
+  {
+   "id": "powder",
+   "name": "Сыпучие"
+  },
+  {
+   "id": "liquid",
+   "name": "Жидкости"
+  },
+  {
+   "id": "gas",
+   "name": "Газы"
+  },
+  {
+   "id": "solid",
+   "name": "Твёрдые"
+  },
+  {
+   "id": "metal",
+   "name": "Металлы"
+  },
+  {
+   "id": "nuclear",
+   "name": "Ядерные"
+  },
+  {
+   "id": "energy",
+   "name": "Огонь и взрывчатка"
+  },
+  {
+   "id": "special",
+   "name": "Особые"
+  }
+ ],
+ "materials": [
+  {
+   "id": "air",
+   "name": "Воздух",
+   "category": "special",
+   "state": "empty",
+   "density": 1.204,
+   "conductivity": 0.026,
+   "heat_capacity": 1005,
+   "thermal_expansion": 0.00341,
+   "colors": [
+    "#0d1017"
+   ],
+   "hidden": true
+  },
+  {
+   "id": "sand",
+   "name": "Песок",
+   "category": "powder",
+   "state": "powder",
+   "density": 1600,
+   "conductivity": 0.3,
+   "heat_capacity": 830,
+   "colors": [
+    "#d8c27a",
+    "#cfb76c",
+    "#e2cd8a",
+    "#c9ad62"
+   ]
+  },
+  {
+   "id": "water",
+   "name": "Вода",
+   "category": "liquid",
+   "state": "liquid",
+   "density": 998,
+   "conductivity": 0.6,
+   "heat_capacity": 4186,
+   "thermal_expansion": 0.0003,
+   "colors": [
+    "#2a6fdb",
+    "#2f78e3"
+   ],
+   "viscosity": 0.0,
+   "freeze": {
+    "temp": 0,
+    "into": "ice",
+    "latent": 334000
+   },
+   "boil": {
+    "temp": 100,
+    "into": "steam",
+    "latent": 2257000
+   },
+   "nuclear": {
+    "absorb": 0.01,
+    "moderate": 0.3
+   }
+  },
+  {
+   "id": "steam",
+   "name": "Пар",
+   "category": "gas",
+   "state": "gas",
+   "density": 0.76,
+   "conductivity": 0.025,
+   "heat_capacity": 2010,
+   "thermal_expansion": 0.00341,
+   "initial_temp": 110,
+   "colors": [
+    "#c8d4e0",
+    "#b8c6d4"
+   ],
+   "condense": {
+    "temp": 100,
+    "into": "water",
+    "latent": 2257000
+   },
+   "gas_alpha": 0.45
+  },
+  {
+   "id": "ice",
+   "name": "Лёд",
+   "category": "solid",
+   "state": "solid",
+   "density": 917,
+   "conductivity": 2.2,
+   "heat_capacity": 2050,
+   "initial_temp": -10,
+   "colors": [
+    "#a8d8f0",
+    "#b8e2f6"
+   ],
+   "melt": {
+    "temp": 0,
+    "into": "water",
+    "latent": 334000
+   }
+  },
+  {
+   "id": "stone",
+   "name": "Камень",
+   "category": "solid",
+   "state": "solid",
+   "density": 2600,
+   "conductivity": 2.5,
+   "heat_capacity": 790,
+   "colors": [
+    "#6b6b70",
+    "#77777c",
+    "#606065"
+   ]
+  },
+  {
+   "id": "steel",
+   "name": "Сталь",
+   "category": "metal",
+   "state": "solid",
+   "density": 7850,
+   "conductivity": 45,
+   "heat_capacity": 490,
+   "glow": true,
+   "colors": [
+    "#8d939b",
+    "#979da5"
+   ]
+  },
+  {
+   "id": "heater",
+   "name": "Нагреватель",
+   "category": "special",
+   "state": "solid",
+   "density": 7850,
+   "conductivity": 45,
+   "heat_capacity": 490,
+   "fixed_temp": 400,
+   "glow": true,
+   "colors": [
+    "#b0442a",
+    "#a33d25"
+   ]
+  },
+  {
+   "id": "wood",
+   "name": "Дерево",
+   "category": "solid",
+   "state": "solid",
+   "density": 700,
+   "conductivity": 0.12,
+   "heat_capacity": 1700,
+   "colors": [
+    "#8a5a2b",
+    "#7d5126",
+    "#93612f"
+   ],
+   "ignite": {
+    "temp": 300,
+    "into": "fire",
+    "burn_time": [
+     2,
+     5
+    ],
+    "residue": "ash",
+    "residue_chance": 0.4,
+    "heat": 15000000.0
+   }
+  },
+  {
+   "id": "fire",
+   "name": "Огонь",
+   "category": "energy",
+   "state": "fire",
+   "density": 0.3,
+   "conductivity": 0.05,
+   "heat_capacity": 1100,
+   "initial_temp": 900,
+   "glow": true,
+   "colors": [
+    "#ff9a1f",
+    "#ffcc33",
+    "#ff5a14"
+   ],
+   "lifetime": [
+    0.3,
+    0.9
+   ],
+   "decay_into": "smoke",
+   "hidden": true
+  },
+  {
+   "id": "smoke",
+   "name": "Дым",
+   "category": "gas",
+   "state": "gas",
+   "density": 1.1,
+   "conductivity": 0.026,
+   "heat_capacity": 1005,
+   "colors": [
+    "#3c3c40",
+    "#46464b"
+   ],
+   "lifetime": [
+    3,
+    6
+   ],
+   "decay_into": "air",
+   "gas_alpha": 0.8
+  },
+  {
+   "id": "ash",
+   "name": "Пепел",
+   "category": "powder",
+   "state": "powder",
+   "density": 600,
+   "conductivity": 0.1,
+   "heat_capacity": 800,
+   "colors": [
+    "#5a5755",
+    "#64615f"
+   ],
+   "wind_coupling": 0.4
+  },
+  {
+   "id": "uranium235",
+   "name": "Уран-235",
+   "category": "nuclear",
+   "state": "solid",
+   "density": 19050,
+   "conductivity": 27,
+   "heat_capacity": 116,
+   "glow": true,
+   "colors": [
+    "#4f7a3a",
+    "#5a8742"
+   ],
+   "melt": {
+    "temp": 1132,
+    "into": "corium",
+    "latent": 38400
+   },
+   "nuclear": {
+    "fissile": 0.35,
+    "fast_fission": 0.03,
+    "absorb": 0.01,
+    "spontaneous": 0.02,
+    "decay_heat": 0.02,
+    "fission_energy": 40,
+    "neutrons_per_fission": [
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "id": "corium",
+   "name": "Кориум",
+   "category": "nuclear",
+   "state": "liquid",
+   "density": 9000,
+   "conductivity": 3,
+   "heat_capacity": 500,
+   "viscosity": 0.85,
+   "glow": true,
+   "initial_temp": 1500,
+   "colors": [
+    "#6a4a2a",
+    "#5e4126"
+   ],
+   "nuclear": {
+    "fissile": 0.12,
+    "fast_fission": 0.01,
+    "absorb": 0.03,
+    "decay_heat": 0.5,
+    "fission_energy": 40,
+    "neutrons_per_fission": [
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "id": "graphite",
+   "name": "Графит",
+   "category": "nuclear",
+   "state": "solid",
+   "density": 2200,
+   "conductivity": 120,
+   "heat_capacity": 710,
+   "colors": [
+    "#2b2b2e",
+    "#323236"
+   ],
+   "nuclear": {
+    "absorb": 0.0005,
+    "moderate": 0.25,
+    "reflect": 0.15
+   }
+  },
+  {
+   "id": "boron_carbide",
+   "name": "Карбид бора",
+   "category": "nuclear",
+   "state": "solid",
+   "density": 2520,
+   "conductivity": 30,
+   "heat_capacity": 950,
+   "colors": [
+    "#3d3a4a",
+    "#45425a"
+   ],
+   "nuclear": {
+    "absorb": 0.8
+   }
+  },
+  {
+   "id": "fan_right",
+   "name": "Вентилятор →",
+   "category": "special",
+   "state": "solid",
+   "density": 7850,
+   "conductivity": 45,
+   "heat_capacity": 490,
+   "colors": [
+    "#5a6a7a"
+   ],
+   "fan": {
+    "dir": [
+     1,
+     0
+    ],
+    "strength": 40
+   }
+  },
+  {
+   "id": "fan_up",
+   "name": "Вентилятор ↑",
+   "category": "special",
+   "state": "solid",
+   "density": 7850,
+   "conductivity": 45,
+   "heat_capacity": 490,
+   "colors": [
+    "#5a6a7a"
+   ],
+   "fan": {
+    "dir": [
+     0,
+     -1
+    ],
+    "strength": 40
+   }
+  },
+  {
+   "id": "tap_water",
+   "name": "Кран воды",
+   "category": "special",
+   "state": "solid",
+   "density": 7850,
+   "conductivity": 45,
+   "heat_capacity": 490,
+   "colors": [
+    "#3a6fa0"
+   ],
+   "emit": {
+    "into": "water",
+    "rate": 20,
+    "temp": null
+   }
+  },
+  {
+   "id": "void",
+   "name": "Пустота",
+   "category": "special",
+   "state": "solid",
+   "density": 1000,
+   "conductivity": 0.0,
+   "heat_capacity": 1000,
+   "colors": [
+    "#000000"
+   ],
+   "drain": {
+    "rate": 60
+   }
+  },
+  {
+   "id": "tnt",
+   "name": "Тротил",
+   "category": "energy",
+   "state": "solid",
+   "density": 1600,
+   "conductivity": 0.2,
+   "heat_capacity": 1400,
+   "colors": [
+    "#c03030"
+   ],
+   "explosive": {
+    "temp": 300,
+    "radius": 10,
+    "energy": 4200000.0,
+    "into": "fire"
+   }
+  }
+ ]
 }
