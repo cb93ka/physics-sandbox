@@ -200,7 +200,7 @@ jobs:
           curl -fsSL -O "$GODOT_DL/$Z"
           curl -fsSL -O "$GODOT_DL/Godot_v${GODOT_RELEASE}_export_templates.tpz"
           grep -E " ($Z|Godot_v${GODOT_RELEASE}_export_templates.tpz)$" SHA512-SUMS.txt | sha512sum -c -
-          python - "$Z" "Godot_v${GODOT_RELEASE}_export_templates.tpz" "$HOME/godot" "$TPL_DIR" <<'PY'
+          python - "$Z" "Godot_v${GODOT_RELEASE}_export_templates.tpz" "$(cygpath -w "$HOME/godot")" "$(cygpath -w "$TPL_DIR")" <<'PY'
           import sys, zipfile, os, shutil
           z, tpz, gdir, tdir = sys.argv[1:]
           with zipfile.ZipFile(z) as f:
