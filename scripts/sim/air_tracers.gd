@@ -104,6 +104,14 @@ func _resize() -> void:
 	_vp.render_target_clear_mode = SubViewport.CLEAR_MODE_ONCE
 
 
+## Мир пересоздан (другой размер) — разбросать частицы заново и стереть хвосты.
+func reset() -> void:
+	for k in _pos.size():
+		_respawn(k)
+	if _vp != null:
+		_vp.render_target_clear_mode = SubViewport.CLEAR_MODE_ONCE
+
+
 func _respawn(k: int) -> void:
 	_pos[k] = Vector2(_rng.randf() * float(sim.get_width()), _rng.randf() * float(sim.get_height()))
 	_life[k] = _rng.randf_range(1.0, 4.0)

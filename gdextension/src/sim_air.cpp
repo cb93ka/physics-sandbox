@@ -9,7 +9,7 @@
 namespace sim {
 
 static const float AIR_VMAX = 160.0f; // world cells per second
-static const float AIR_BUOY = 981.0f * 0.35f; // g in cells/s^2 (1 cell = 1 cm), damped for play
+static const float AIR_BUOY = 981.0f * 0.16f; // g in cells/s^2 (1 cell = 1 cm), damped for play
 static const float AIR_VISC = 0.2f; // also suppresses the collocated-grid checkerboard mode // blend towards neighbour mean per step
 static const float AIR_DAMP = 0.996f;
 static const int AIR_JACOBI = 24;
@@ -29,6 +29,10 @@ void World::air_setup() {
 	acount.assign(n, 0);
 	afan.assign(n, 0);
 	atotal.assign(n, 0);
+	airN.assign(n, 0);
+	airS.assign(n, 0.0f);
+	airT.assign(n, ambient);
+	airT2.assign(n, ambient);
 	for (int ay = 0; ay < AH; ay++)
 		for (int ax = 0; ax < AW; ax++) {
 			int cw = std::min(AIR_SCALE, W - ax * AIR_SCALE), ch = std::min(AIR_SCALE, H - ay * AIR_SCALE);
@@ -127,6 +131,8 @@ void World::air_step() {
 	float *tsum = atmp.data();
 	std::fill(atmp.begin(), atmp.end(), 0.0f);
 	std::fill(acount.begin(), acount.end(), 0);
+	std::fill(airN.begin(), airN.end(), 0);
+	std::fill(airS.begin(), airS.end(), 0.0f);
 	bool any_fan = false;
 	uint8_t cls[256];
 	for (int m = 0; m < 256; m++) {
@@ -145,6 +151,10 @@ void World::air_step() {
 			if (k == 1) {
 				acount[ai]++;
 				tsum[ai] += tr[x];
+				if (mr[x] == 0) {
+					airN[ai]++;
+					airS[ai] += tr[x];
+				}
 				continue;
 			}
 			const Material &M = mats[mr[x]];
@@ -349,39 +359,58 @@ void World::air_step() {
 		}
 	for (int i = 0; i < n; i++) asrc[i] *= 0.8f;
 
-	// ---- 6. heat carried by the air: apply the coarse advection delta to gas cells ----
+	// ---- 6. heat carried by the air, energy-conserving ----
+	// Mean temperature of the air cells of each block is advected semi-Lagrangian (bounded), then
+	// corrected so that sum(C * dT) over all air cells is exactly zero. The block
+	// change is added to its air cells only: gases already travel as cells (wind/move passes).
 	{
-		float *d = atmp.data(); // reuse as delta
-		bool any = false;
-		for (int i = 0; i < n; i++) {
-			float dd = asolid[i] ? 0.0f : atemp[i] - atemp0[i];
-			if (dd > 200.0f) dd = 200.0f;
-			if (dd < -200.0f) dd = -200.0f;
-			d[i] = dd;
-			if (std::fabs(dd) > 0.01f) any = true;
-		}
-		if (any) {
-			uint8_t carry[256];
-			for (int m = 0; m < 256; m++)
-				carry[m] = m < (int)mats.size() && (mats[m].state == ST_EMPTY || mats[m].state == ST_GAS) ? 1 : 0;
-			for (int ay = 0; ay < AH; ay++)
-				for (int ax = 0; ax < AW; ax++) {
-					const float dd = d[ay * AW + ax];
-					if (dd == 0.0f) continue;
-					const int x0 = ax * AIR_SCALE, y0 = ay * AIR_SCALE;
-					const int x1 = std::min(W, x0 + AIR_SCALE), y1 = std::min(H, y0 + AIR_SCALE);
-					for (int y = y0; y < y1; y++) {
-						const int row = y * W;
-						for (int x = x0; x < x1; x++) {
-							const int i = row + x;
-							if (!carry[mat[i]]) continue;
-							float t = temp[i] + dd;
-							temp[i] = t < MIN_TEMP ? MIN_TEMP : (t > MAX_TEMP ? MAX_TEMP : t);
-						}
-					}
-					if (std::fabs(dd) > 0.05f) chunks[(y0 >> CHUNK_SHIFT) * CW + (x0 >> CHUNK_SHIFT)].therm_awake = true;
+		for (int i = 0; i < n; i++) airT[i] = airN[i] ? airS[i] / airN[i] : atemp0[i];
+		const float kk = dt / AIR_SCALE;
+		double dsum = 0.0, pos = 0.0, neg = 0.0;
+		float *nt = airT2.data();
+		for (int y = 0; y < AH; y++)
+			for (int x = 0; x < AW; x++) {
+				const int i = y * AW + x;
+				if (!airN[i]) {
+					nt[i] = airT[i];
+					continue;
 				}
-		}
+				nt[i] = air_sample(airT, x - au[i] * kk, y - av[i] * kk);
+				dsum += (double)airN[i] * (nt[i] - airT[i]);
+				const double c = (double)airN[i] * (nt[i] - airT[i]);
+				if (c > 0) pos += c;
+				else neg -= c;
+			}
+		// the imbalance is taken back from the blocks that changed, in proportion to their change, so
+		// still air far away is not shifted (that would make the ambient edge leak energy)
+		// dsum > 0: scale down the warming blocks by (1 - dsum/pos); dsum < 0: the cooling ones.
+		// Both factors lie in [0, 1], so no block overshoots.
+		const double fpos = dsum > 0.0 && pos > 0.0 ? dsum / pos : 0.0;
+		const double fneg = dsum < 0.0 && neg > 0.0 ? -dsum / neg : 0.0;
+		for (int ay = 0; ay < AH; ay++)
+			for (int ax = 0; ax < AW; ax++) {
+				const int b = ay * AW + ax;
+				if (!airN[b]) continue;
+				const float ch = nt[b] - airT[b];
+				const float dd = (float)(ch > 0.0f ? ch * (1.0 - fpos) : ch * (1.0 - fneg));
+				if (dd == 0.0f) continue; // no threshold: the global correction must reach every block
+				const int x0 = ax * AIR_SCALE, y0 = ay * AIR_SCALE;
+				const int x1 = std::min(W, x0 + AIR_SCALE), y1 = std::min(H, y0 + AIR_SCALE);
+				// warming: same dT for every air cell; cooling: in proportion to each cell's excess over
+				// absolute zero (a cold cell next to a hot one in the same block never drops below it)
+				const float denom = airT[b] - MIN_TEMP;
+				const float kcool = (dd < 0.0f && denom > 1e-3f) ? dd / denom : 0.0f;
+				for (int y = y0; y < y1; y++) {
+					const int row = y * W;
+					for (int x = x0; x < x1; x++) {
+						const int i = row + x;
+						if (mat[i] != 0) continue;
+						if (dd > 0.0f) temp[i] = std::min(temp[i] + dd, MAX_TEMP);
+						else temp[i] += kcool * (temp[i] - MIN_TEMP);
+					}
+				}
+				if (std::fabs(dd) > 0.05f) chunks[(y0 >> CHUNK_SHIFT) * CW + (x0 >> CHUNK_SHIFT)].therm_awake = true;
+			}
 	}
 }
 

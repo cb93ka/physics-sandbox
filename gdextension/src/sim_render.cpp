@@ -35,14 +35,16 @@ static void lerp_stops(const Stop *s, int n, float t, float &r, float &g, float 
 }
 
 // Approximate black-body colour (sRGB) for a temperature in °C.
+// Incandescence (sRGB) for a temperature in °C: Draper point ~525 °C dark red -> orange ->
+// yellow -> white towards 1500 °C and above.
 static const Stop BB[] = {
-	{ 500, 90, 0, 0 },
-	{ 750, 190, 25, 0 },
-	{ 1000, 255, 90, 5 },
-	{ 1300, 255, 160, 50 },
-	{ 1700, 255, 210, 130 },
-	{ 2300, 255, 240, 210 },
-	{ 3200, 250, 250, 255 },
+	{ 525, 110, 12, 0 },
+	{ 700, 185, 30, 0 },
+	{ 900, 255, 90, 10 },
+	{ 1100, 255, 160, 45 },
+	{ 1300, 255, 210, 115 },
+	{ 1500, 255, 240, 190 },
+	{ 2000, 255, 252, 240 },
 };
 
 // Thermal camera palette over u in 0..1.
@@ -86,10 +88,19 @@ void World::prepare_render_tables() {
 		lerp_stops(IRON, 8, thermal_u((float)k - 300.0f), r, g, b);
 		thermal_lut[k][0] = clamp8(r), thermal_lut[k][1] = clamp8(g), thermal_lut[k][2] = clamp8(b);
 	}
+	// glow_lut over T = 150 + k: colour and mix weight. 150..525 °C: faint warm tint (up to 15 %),
+	// from 525 °C: incandescence, fully opaque by ~850 °C.
 	for (int k = 0; k < 3100; k++) {
-		float r, g, b;
-		lerp_stops(BB, 7, 450.0f + k, r, g, b);
-		bb_lut[k][0] = clamp8(r), bb_lut[k][1] = clamp8(g), bb_lut[k][2] = clamp8(b);
+		const float T = 150.0f + k;
+		float r, g, b, f;
+		if (T < 525.0f) {
+			r = 255, g = 130, b = 70;
+			f = 0.15f * (T - 150.0f) / 375.0f;
+		} else {
+			lerp_stops(BB, 7, T, r, g, b);
+			f = std::max(0.15f, std::min(1.0f, (T - 500.0f) / 350.0f));
+		}
+		glow_lut[k][0] = clamp8(r), glow_lut[k][1] = clamp8(g), glow_lut[k][2] = clamp8(b), glow_lut[k][3] = clamp8(f * 255.0f);
 	}
 	for (int k = 0; k < 1024; k++) flux_lut[k] = clamp8(255.0f * (1.0f - std::exp(-(k / 8.0f) * 0.25f)));
 	for (int k = 0; k < 1024; k++) {
@@ -167,15 +178,15 @@ void World::render(int view, uint8_t *out_bytes) {
 		} else if (M.state == ST_LIQUID && ((frame + v) & 63) == 0) {
 			c = base_rgba[m][(slot & ~7) | 7]; // shimmer: brightest jitter
 		}
-		const bool hot = (M.glow || burning) && T > 450.0f;
+		const bool hot = (M.glow || burning) && T > 150.0f && view != 2;
 		if (hot || burning || view >= 2) {
 			float r = (float)(c & 255), g = (float)((c >> 8) & 255), b = (float)((c >> 16) & 255);
 			const uint8_t a = (uint8_t)(c >> 24);
 			if (hot) {
-				int k = (int)(T - 450.0f);
+				int k = (int)(T - 150.0f);
 				if (k > 3099) k = 3099;
-				const uint8_t *bb = bb_lut[k];
-				float t = k >= 650 ? 1.0f : k * (1.0f / 650.0f);
+				const uint8_t *bb = glow_lut[k];
+				const float t = bb[3] * (1.0f / 255.0f);
 				r += (bb[0] - r) * t;
 				g += (bb[1] - g) * t;
 				b += (bb[2] - b) * t;

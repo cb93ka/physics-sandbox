@@ -17,6 +17,11 @@ static const float CONV_LIQ = 150.0f;
 static const float CONV_GAS = 8.0f;
 static const float CONV_AIR = 25.0f;
 static const float MELT_INTERFACE_BOOST = 2.0f;
+static const float H_GAS = 25.0f; // W/(m2 K)
+static const float RAD_MIN_T = 300.0f; // °C, cells hotter than this radiate
+static const float H_FLAME = 150.0f;
+static const float GAS_TEMP_CAP = 3000.0f; // gases from reactions/explosions
+static const float GAS_TOOL_CAP = 1200.0f; // heat tool on gases
 
 static inline int ring(int d) { return d & 7; }
 
@@ -33,9 +38,19 @@ void World::finalize_materials() {
 		M.cell_C = M.density * M.heat_capacity * vol;
 		if (M.cell_C <= 0) M.cell_C = 1e-9f;
 		M.inv_c = M.heat_capacity > 0 ? 1.0f / M.heat_capacity : 0.0f;
-		M.inv_C = (M.flags & MF_FIXED) ? 0.0f : 1.0f / M.cell_C;
+		// fixed_temp cells and living flames (held at flame temperature by combustion) act as
+		// sources/sinks of unlimited capacity in the exchange
+		M.inv_C = ((M.flags & MF_FIXED) || M.state == ST_FIRE) ? 0.0f : 1.0f / M.cell_C;
 	}
 	const int n = (int)mats.size();
+	for (auto &M : mats) {
+		for (Transition *t : { &M.melt, &M.freeze, &M.boil, &M.condense })
+			if (t->has) t->energy = t->latent * std::max(M.mass, mats[t->into].mass);
+		if (M.flags & MF_IGNITE) {
+			const float it = mats[M.ign_into].initial_temp;
+			M.flame_temp = std::isnan(it) ? M.ign_temp + 600.0f : it;
+		}
+	}
 	F_raw.assign(256 * 256, 0.0f);
 	F_eff.assign(256 * 256, 0.0f);
 	F_sub.assign(256 * 256, 0.0f);
@@ -48,6 +63,21 @@ void World::finalize_materials() {
 			float h = (ka + kb) > 0 ? 2.0f * ka * kb / (ka + kb) : 0.0f;
 			// flux = k * area * dT / dx = k * dx * dT   (area dx^2, distance dx)
 			F_raw[a * 256 + b] = h * cell_size;
+			// gas <-> non-gas: natural convection at the surface, h ~ 25 W/(m2 K) for still gas,
+			// ~150 for flames; conduction across one cell of gas underestimates this a lot
+			{
+				const State xa = mats[a].state, xb = mats[b].state;
+				const bool ga = xa == ST_EMPTY || xa == ST_GAS || xa == ST_FIRE;
+				const bool gb = xb == ST_EMPTY || xb == ST_GAS || xb == ST_FIRE;
+				if (ga != gb) {
+					const float hconv = (xa == ST_FIRE || xb == ST_FIRE) ? H_FLAME : H_GAS;
+					F_raw[a * 256 + b] = std::max(F_raw[a * 256 + b], hconv * cell_size * cell_size);
+				}
+			}
+			// gameplay: faster conduction inside solids and powders (real ordering is kept)
+			const bool sa = mats[a].state == ST_SOLID || mats[a].state == ST_POWDER;
+			const bool sb = mats[b].state == ST_SOLID || mats[b].state == ST_POWDER;
+			if (sa && sb) F_raw[a * 256 + b] *= solid_conduction_scale;
 			// A solid next to its own melt (ice-water, wax-molten wax): the meltwater boundary layer
 			// convects, which one cell of still liquid cannot represent; boost that interface.
 			const Material &A = mats[a], &B = mats[b];
@@ -176,11 +206,22 @@ void World::set_cell(int i, int m, float t) {
 	const Material &M = mats[m];
 	mat[i] = (uint8_t)m;
 	if (M.flags & MF_FIXED) t = M.fixed_temp;
+	if (std::isnan(t)) t = ambient;
 	temp[i] = std::min(std::max(t, MIN_TEMP), MAX_TEMP);
 	phase[i] = 0.0f;
 	life[i] = (M.flags & MF_LIFE) ? M.life_min + (M.life_max - M.life_min) * frand() : 0.0f;
 	var[i] = (uint8_t)rnd();
 	cflags[i] = 0;
+}
+
+void World::transmute(int i, int m) {
+	const float P = phase[i], T = temp[i];
+	set_cell(i, m, T);
+	if (P == 0.0f) return;
+	const Material &N = mats[m];
+	const bool up = N.melt.has || N.boil.has, dn = N.freeze.has || N.condense.has;
+	if ((P > 0.0f && up) || (P < 0.0f && dn)) phase[i] = P; // keep the stored latent energy
+	else if (N.inv_C > 0.0f) temp[i] = std::min(std::max(temp[i] + P * N.inv_C, MIN_TEMP), MAX_TEMP);
 }
 
 void World::swap_cells(int i, int j) {
@@ -271,7 +312,10 @@ void World::heat_circle(int cx, int cy, int r, float watts, float delta) {
 			int i = y * W + x;
 			float ic = inv_C[mat[i]];
 			if (ic == 0.0f) continue;
-			temp[i] = std::min(std::max(temp[i] + e * ic, MIN_TEMP), MAX_TEMP);
+			float t = temp[i] + e * ic;
+			const State st = mats[mat[i]].state;
+			if (st == ST_EMPTY || st == ST_GAS) t = std::min(t, std::max(temp[i], GAS_TOOL_CAP)); // energy the gas cannot take is not created
+			temp[i] = std::min(std::max(t, MIN_TEMP), MAX_TEMP);
 			wake(x, y);
 		}
 	}
@@ -412,7 +456,7 @@ void World::update_cell(int x, int y) {
 	if (M.flags & MF_LIFE) {
 		life[i] -= FIXED_DT;
 		if (life[i] <= 0.0f) {
-			set_cell(i, M.decay_into, temp[i]);
+			transmute(i, M.decay_into);
 			clock[i] = stamp;
 			wake(x, y);
 			return;
@@ -693,7 +737,10 @@ void World::update_air(int i, int x, int y) {
 void World::add_heat(int i, float joules) {
 	const float ic = inv_C[mat[i]];
 	if (ic == 0.0f) return;
-	temp[i] = std::min(std::max(temp[i] + joules * ic, MIN_TEMP), MAX_TEMP);
+	float t = temp[i] + joules * ic;
+	const State st = mats[mat[i]].state;
+	if (st == ST_EMPTY || st == ST_GAS) t = std::min(t, std::max(temp[i], GAS_TEMP_CAP));
+	temp[i] = std::min(std::max(t, MIN_TEMP), MAX_TEMP);
 	const int x = i % W, y = i / W;
 	chunks[(y >> CHUNK_SHIFT) * CW + (x >> CHUNK_SHIFT)].therm_awake = true;
 }
@@ -769,7 +816,7 @@ void World::explode(int cx, int cy, int radius, float energy_j, int into) {
 		}
 		const int ci = y * W + x;
 		if (mat[ci] == 0 && d < R * 0.6f && fire_id > 0 && frand() < 0.6f) {
-			set_cell(ci, fire_id, std::max(temp[ci], mats[fire_id].initial_temp));
+			set_cell(ci, fire_id, std::max(temp[ci], init_temp(fire_id)));
 		}
 		wake(x, y);
 	}
@@ -792,7 +839,7 @@ void World::special_pass() {
 		if (cflags[i] & CF_BURNING) {
 			const float burn_total = std::max(0.05f, 0.5f * (M.burn_min + M.burn_max));
 			// heat release (power, scaled as a thermal process), capped at flame temperature
-			const float flame_t = mats[M.ign_into].initial_temp;
+			const float flame_t = M.flame_temp;
 			float dT = M.ign_heat * M.inv_c / burn_total * dt_th;
 			if (temp[i] < flame_t) temp[i] = std::min(flame_t, temp[i] + dT);
 			chunks[(y >> CHUNK_SHIFT) * CW + (x >> CHUNK_SHIFT)].therm_awake = true;
@@ -801,7 +848,7 @@ void World::special_pass() {
 				const int u = ring(grav_dir + 4 + (int)(rnd() % 3) - 1);
 				int nx = x + RX[u], ny = y + RY[u];
 				if (inb(nx, ny) && mat[ny * W + nx] == 0) {
-					set_cell(ny * W + nx, M.ign_into, mats[M.ign_into].initial_temp);
+					set_cell(ny * W + nx, M.ign_into, M.flame_temp);
 					wake(nx, ny);
 				}
 			}
@@ -809,9 +856,9 @@ void World::special_pass() {
 			if (life[i] <= 0.0f) {
 				const float t = temp[i];
 				if (M.residue >= 0 && frand() < M.residue_chance)
-					set_cell(i, M.residue, t);
+					transmute(i, M.residue);
 				else
-					set_cell(i, M.ign_into, std::max(t, mats[M.ign_into].initial_temp));
+					set_cell(i, M.ign_into, std::max(t, M.flame_temp));
 				wake(x, y);
 				continue;
 			}
@@ -833,7 +880,7 @@ void World::special_pass() {
 			if ((f & MF_EXPLOSIVE) && (temp[i] >= M.exp_temp || flame_near)) {
 				const float e = M.exp_energy * M.mass;
 				const int into = M.exp_into;
-				set_cell(i, into, std::max(temp[i], mats[into].initial_temp));
+				set_cell(i, into, std::max(temp[i], init_temp(into)));
 				explode(x, y, M.exp_radius, e, into);
 				continue;
 			}
@@ -939,8 +986,10 @@ void World::special_pass() {
 				if (R.has_max && tavg > R.max_t) continue;
 				int ia = r > 0 ? i : j, ib = r > 0 ? j : i;
 				float ta = temp[ia], tb = temp[ib];
-				if (R.into_a >= 0) set_cell(ia, R.into_a, ta);
-				if (R.into_b >= 0) set_cell(ib, R.into_b, tb);
+				(void)ta;
+				(void)tb;
+				if (R.into_a >= 0) transmute(ia, R.into_a);
+				if (R.into_b >= 0) transmute(ib, R.into_b);
 				if (R.heat != 0.0f) {
 					// split in proportion to heat capacity: both cells get the same temperature change
 					const float ca = mats[mat[ia]].cell_C, cb = mats[mat[ib]].cell_C;
@@ -1120,6 +1169,8 @@ void World::heat_pass() {
 		}
 	}
 
+	radiation(dt_th);
+
 	heat_chunks = (int)active_list.size();
 	float tmax = -1e30f;
 	for (int c : active_list) post_heat_chunk(c, tmax);
@@ -1129,53 +1180,122 @@ void World::heat_pass() {
 	max_temp = mt;
 }
 
+// Simplified radiation: every cell hotter than RAD_MIN_T (300 °C) (not a gas, or a flame) sends rays in 8
+// directions through gas for up to RAD_RANGE cells; the first non-gas cell hit exchanges
+// eps*sigma*(T1^4 - T2^4)*A/8 with it. Pairwise, so energy is conserved (flames and fixed_temp
+// cells are sources of unlimited capacity). Limited to 10 % of the pair's temperature gap per step.
+void World::radiation(float dt_th) {
+	static const int RX8[8] = { 1, 1, 0, -1, -1, -1, 0, 1 };
+	static const int RY8[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+	const int RAD_RANGE = 24;
+	const float A = cell_size * cell_size;
+	const float SIG = 5.670e-8f;
+	for (int c : active_list) {
+		if (chunks[c].tmax < RAD_MIN_T) continue; // last known maximum of the chunk
+		const int cx = c % CW, cy = c / CW;
+		const int x0 = cx * CHUNK, y0 = cy * CHUNK;
+		const int x1 = std::min(W - 1, x0 + CHUNK - 1), y1 = std::min(H - 1, y0 + CHUNK - 1);
+		for (int y = y0; y <= y1; y++)
+			for (int x = x0; x <= x1; x++) {
+				const int i = y * W + x;
+				const float T1 = temp[i];
+				if (T1 < RAD_MIN_T) continue;
+				const int m1 = mat[i];
+				const State s1 = mats[m1].state;
+				if (s1 == ST_EMPTY || s1 == ST_GAS) continue;
+				// only surfaces radiate: skip cells buried in non-gas
+				bool open = false;
+				for (int d = 0; d < 8 && !open; d++) {
+					const int nx = x + RX8[d], ny = y + RY8[d];
+					if (!inb(nx, ny)) continue;
+					const State sn = mats[mat[ny * W + nx]].state;
+					open = sn == ST_EMPTY || sn == ST_GAS || sn == ST_FIRE;
+				}
+				if (!open) continue;
+				const float eps = s1 == ST_FIRE ? 0.3f : 0.8f;
+				const float K1 = T1 + 273.15f, K14 = K1 * K1 * K1 * K1;
+				for (int d = 0; d < 8; d++) {
+					int tx = x, ty = y, k = 0;
+					int j = -1;
+					while (k < RAD_RANGE) {
+						tx += RX8[d];
+						ty += RY8[d];
+						k++;
+						if (!inb(tx, ty)) break;
+						const int q = ty * W + tx;
+						const State sq = mats[mat[q]].state;
+						if (sq == ST_EMPTY || sq == ST_GAS || sq == ST_FIRE) continue;
+						j = q;
+						break;
+					}
+					if (j < 0 || k == 1) continue; // touching cells exchange by conduction already
+					const float T2 = temp[j];
+					if (T2 >= T1) continue;
+					const float K2 = T2 + 273.15f;
+					float e = eps * SIG * (K14 - K2 * K2 * K2 * K2) * A * 0.125f * dt_th;
+					const float ia = inv_C[m1], ib = inv_C[mat[j]];
+					const float lim = 0.1f * (T1 - T2) / std::max(ia + ib, 1e-12f);
+					if (e > lim) e = lim;
+					temp[i] -= e * ia;
+					temp[j] += e * ib;
+					chunks[(ty >> CHUNK_SHIFT) * CW + (tx >> CHUNK_SHIFT)].therm_awake = true;
+				}
+			}
+	}
+}
+
+// Latent heat with an energy-consistent buffer in joules per cell. Each transition costs
+// latent * max(mass of both phases) J, the same in both directions (boil and condense, melt and
+// freeze), so a steam cell gives back exactly what the water took. While the buffer is filling the
+// cell sits at the transition temperature.
 void World::handle_phase(int i) {
 	const int m = mat[i];
 	const Material &M = mats[m];
 	if (M.flags & MF_FIXED) return;
 	const Transition *up = M.melt.has ? &M.melt : (M.boil.has ? &M.boil : nullptr);
 	const Transition *dn = M.freeze.has ? &M.freeze : (M.condense.has ? &M.condense : nullptr);
-	const float c = M.heat_capacity;
+	const float C = M.cell_C, iC = M.inv_C;
 	float T = temp[i];
 	float P = phase[i];
 	// give back partially stored latent heat when the cell moves back across the point
 	if (P > 0.0f && up && T < up->temp) {
-		float take = std::min((up->temp - T) * c, P);
+		float take = std::min((up->temp - T) * C, P);
 		P -= take;
-		T += take * M.inv_c;
+		T += take * iC;
 	} else if (P < 0.0f && dn && T > dn->temp) {
-		float take = std::min((T - dn->temp) * c, -P);
+		float take = std::min((T - dn->temp) * C, -P);
 		P += take;
-		T -= take * M.inv_c;
+		T -= take * iC;
 	}
 	int into = -1;
 	float left = 0.0f, tp = 0.0f;
 	int dir = 0;
 	if (up && T > up->temp) {
-		P += (T - up->temp) * c;
+		P += (T - up->temp) * C;
 		T = up->temp;
-		if (P >= up->latent) {
+		if (P >= up->energy) {
 			into = up->into;
-			left = P - up->latent;
+			left = P - up->energy;
 			tp = up->temp;
 			dir = 1;
 		}
 	} else if (dn && T < dn->temp) {
-		P -= (dn->temp - T) * c;
+		P -= (dn->temp - T) * C;
 		T = dn->temp;
-		if (-P >= dn->latent) {
+		if (-P >= dn->energy) {
 			into = dn->into;
-			left = -P - dn->latent;
+			left = -P - dn->energy;
 			tp = dn->temp;
 			dir = -1;
 		}
 	}
 	if (into >= 0) {
-		const Material &N = mats[into];
-		float nt = tp + dir * left * N.inv_c;
-		uint8_t keepflags = cflags[i];
-		set_cell(i, into, nt);
-		(void)keepflags;
+		// the leftover of this step goes into the new phase; a gas has a tiny heat capacity, so
+		// the jump is capped (the leftover is at most one step of heat flow, < 1 % of the latent)
+		float dT = left * mats[into].inv_C;
+		const State ns = mats[into].state;
+		if ((ns == ST_GAS || ns == ST_FIRE || ns == ST_EMPTY) && dT > 10.0f) dT = 10.0f;
+		set_cell(i, into, tp + dir * dT);
 		wake(i % W, i / W);
 	} else {
 		temp[i] = T;
@@ -1196,6 +1316,14 @@ void World::post_heat_chunk(int c, float &tmax_global) {
 			const uint32_t f = mats[mat[i]].flags;
 			if (f & MF_PHASE) handle_phase(i);
 			float T = temp[i];
+			const State st = mats[mat[i]].state;
+			if (st == ST_GAS || st == ST_EMPTY) {
+				if (T > GAS_TEMP_CAP) temp[i] = T = GAS_TEMP_CAP;
+			} else if (st == ST_FIRE) {
+				// a living flame is kept at flame temperature by its combustion
+				const float ft = init_temp(mat[i]);
+				if (T < ft) temp[i] = T = ft;
+			}
 			if (T < MIN_TEMP) temp[i] = T = MIN_TEMP;
 			if (T > MAX_TEMP) temp[i] = T = MAX_TEMP;
 			if (T < tmin) tmin = T;

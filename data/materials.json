@@ -2,7 +2,8 @@
   "version": 1,
   "cell_size_m": 0.01,
   "ambient_temp": 20.0,
-  "thermal_time_scale": 17.0,
+  "thermal_time_scale": 14.0,
+  "solid_conduction_scale": 6,
   "categories": [
     {"id": "powder", "name": "Сыпучие"},
     {"id": "liquid", "name": "Жидкости"},
@@ -209,7 +210,7 @@
       "viscosity": 0.0,
       "freeze": {"temp": 0, "into": "ice", "latent": 334000},
       "boil": {"temp": 100, "into": "steam", "latent": 2257000},
-      "nuclear": {"moderate": 0.3, "absorb": 0.01},
+      "nuclear": {"moderate": 0.3, "absorb": 0.022},
       "desc": "Вода: самая большая теплоёмкость среди обычных жидкостей, 4,18 кДж/(кг·К)."
     },
     {
@@ -697,7 +698,7 @@
       "initial_temp": -10.0,
       "colors": ["#a8d8f0", "#b8e2f5", "#98cde8"],
       "melt": {"temp": 0, "into": "water", "latent": 334000},
-      "nuclear": {"moderate": 0.28, "absorb": 0.009},
+      "nuclear": {"moderate": 0.28, "absorb": 0.02},
       "movable_solid": true,
       "desc": "Лёд легче воды на 8 %, поэтому плавает; на таяние уходит 334 кДж/кг."
     },
@@ -938,26 +939,26 @@
       "category": "nuclear",
       "state": "solid",
       "density": 10970,
-      "conductivity": 4.0,
+      "conductivity": 8.0,
       "heat_capacity": 270,
       "colors": ["#9be22a", "#b4f03c", "#86cc1e", "#c8f75a"],
       "glow": true,
       "melt": {"temp": 2847, "into": "corium", "latent": 274000},
       "acid_resistance": 0.8,
       "nuclear": {
-        "fissile": 0.45,
-        "fast_fission": 0.03,
-        "absorb": 0.08,
+        "fissile": 0.2,
+        "fast_fission": 0.02,
+        "absorb": 0.02,
         "moderate": 0.0,
         "reflect": 0.0,
         "spontaneous": 0.05,
         "decay_heat": 0.0005,
-        "fission_energy": 3.0,
+        "fission_energy": 2.0,
         "neutrons_per_fission": [2, 3],
         "burnup_into": "spent_fuel",
-        "burnup_chance": 0.0005,
+        "burnup_chance": 5e-06,
         "poison_into": "xenon135",
-        "poison_chance": 0.03
+        "poison_chance": 0.005
       },
       "desc": "Обогащённый диоксид урана: тепловые нейтроны делят U-235, выделяя 200 МэВ на ядро."
     },
@@ -979,39 +980,38 @@
         "absorb": 0.04,
         "spontaneous": 0.1,
         "decay_heat": 0.0002,
-        "fission_energy": 3.0,
+        "fission_energy": 0.6,
         "neutrons_per_fission": [2, 3],
         "burnup_into": "spent_fuel",
-        "burnup_chance": 0.0005
+        "burnup_chance": 5e-05
       },
       "desc": "U-238 делится только быстрыми нейтронами, а медленные в основном захватывает."
     },
     {
       "id": "plutonium239",
-      "name": "Плутоний-239",
+      "name": "Плутоний-239 (металл)",
       "category": "nuclear",
       "state": "solid",
-      "density": 11460,
-      "conductivity": 6.0,
-      "heat_capacity": 260,
+      "density": 19816,
+      "conductivity": 6.74,
+      "heat_capacity": 130,
       "colors": ["#38d9a9", "#4be0b6", "#2cc497"],
-      "glow": true,
-      "melt": {"temp": 2744, "into": "corium", "latent": 260000},
-      "acid_resistance": 0.8,
+      "melt": {"temp": 639.4, "into": "molten_plutonium", "latent": 11800},
+      "acid_resistance": 0.5,
       "nuclear": {
-        "fissile": 0.55,
-        "fast_fission": 0.05,
-        "absorb": 0.12,
-        "spontaneous": 0.3,
-        "decay_heat": 0.02,
-        "fission_energy": 3.1,
+        "fissile": 0.9,
+        "fast_fission": 0.087,
+        "absorb": 0.01,
+        "spontaneous": 0.4,
+        "decay_heat": 0.04,
+        "fission_energy": 0.62,
         "neutrons_per_fission": [2, 4],
         "burnup_into": "spent_fuel",
-        "burnup_chance": 0.0005,
+        "burnup_chance": 5e-05,
         "poison_into": "xenon135",
-        "poison_chance": 0.03
+        "poison_chance": 0.005
       },
-      "desc": "Диоксид плутония: Pu-239 делится охотнее U-235 и даёт около трёх нейтронов."
+      "desc": "Металлический Pu-239: критмасса голого шара всего около 10 кг — шар диаметром 10 см."
     },
     {
       "id": "thorium232",
@@ -1031,10 +1031,10 @@
         "absorb": 0.05,
         "spontaneous": 0.0,
         "decay_heat": 0.0001,
-        "fission_energy": 3.0,
+        "fission_energy": 0.6,
         "neutrons_per_fission": [2, 3],
         "burnup_into": "spent_fuel",
-        "burnup_chance": 0.0005
+        "burnup_chance": 5e-05
       },
       "desc": "Диоксид тория: сам почти не делится, но захватывает нейтроны (в жизни — путь к U-233)."
     },
@@ -1056,7 +1056,7 @@
         "absorb": 0.25,
         "spontaneous": 1.0,
         "decay_heat": 10.0,
-        "fission_energy": 3.0,
+        "fission_energy": 0.6,
         "neutrons_per_fission": [2, 3]
       },
       "desc": "Отработанное топливо греется само: остаточное тепловыделение — несколько процентов мощности."
@@ -1074,7 +1074,7 @@
       "colors": ["#ff7a2a", "#e85a1e", "#f2a03a", "#c9d43a"],
       "glow": true,
       "viscosity": 0.9,
-      "freeze": {"temp": 2600, "into": "spent_fuel", "latent": 274000},
+      "freeze": {"temp": 1100, "into": "corium_solid", "latent": 274000},
       "acid_resistance": 0.9,
       "nuclear": {
         "fissile": 0.15,
@@ -1082,7 +1082,7 @@
         "absorb": 0.1,
         "spontaneous": 0.5,
         "decay_heat": 15.0,
-        "fission_energy": 3.0,
+        "fission_energy": 0.6,
         "neutrons_per_fission": [2, 3]
       },
       "desc": "Кориум — расплав топлива, оболочек и стали; в Чернобыле застыл «слоновьей ногой»."
@@ -1344,6 +1344,7 @@
       "colors": ["#5b6b7a", "#677788", "#50606e"],
       "acid_resistance": 1.0,
       "fan": {"dir": [0, -1], "strength": 40},
+      "glow": false,
       "desc": "Вентилятор гонит воздух вверх со скоростью 40 клеток/с (0,4 м/с)."
     },
     {
@@ -1357,6 +1358,7 @@
       "colors": ["#5b6b7a", "#677788", "#50606e"],
       "acid_resistance": 1.0,
       "fan": {"dir": [0, 1], "strength": 40},
+      "glow": false,
       "desc": "Вентилятор гонит воздух вниз со скоростью 40 клеток/с (0,4 м/с)."
     },
     {
@@ -1370,6 +1372,7 @@
       "colors": ["#5b6b7a", "#677788", "#50606e"],
       "acid_resistance": 1.0,
       "fan": {"dir": [-1, 0], "strength": 40},
+      "glow": false,
       "desc": "Вентилятор гонит воздух влево со скоростью 40 клеток/с (0,4 м/с)."
     },
     {
@@ -1383,6 +1386,7 @@
       "colors": ["#5b6b7a", "#677788", "#50606e"],
       "acid_resistance": 1.0,
       "fan": {"dir": [1, 0], "strength": 40},
+      "glow": false,
       "desc": "Вентилятор гонит воздух вправо со скоростью 40 клеток/с (0,4 м/с)."
     },
     {
@@ -1396,6 +1400,7 @@
       "colors": ["#3c5f8a", "#45699a", "#35557c"],
       "acid_resistance": 1.0,
       "emit": {"into": "water", "rate": 20, "temp": null},
+      "glow": false,
       "desc": "Кран: 20 клеток воды в секунду, примерно 20 мл/с, как открытый смеситель."
     },
     {
@@ -1423,6 +1428,7 @@
       "colors": ["#8c7a4a", "#9a8754", "#7e6d40"],
       "acid_resistance": 1.0,
       "emit": {"into": "sand", "rate": 20, "temp": null},
+      "glow": false,
       "desc": "Бункер с песком: сыплет 20 клеток в секунду."
     },
     {
@@ -1436,6 +1442,7 @@
       "colors": ["#4f7a55", "#5a8760", "#456c4a"],
       "acid_resistance": 1.0,
       "emit": {"into": "methane", "rate": 15, "temp": null},
+      "glow": false,
       "desc": "Вентиль природного газа: метан без запаха, одорант добавляют для безопасности."
     },
     {
@@ -1449,6 +1456,7 @@
       "colors": ["#7d8792", "#89939e", "#717b86"],
       "acid_resistance": 1.0,
       "emit": {"into": "steam", "rate": 15, "temp": null},
+      "glow": false,
       "desc": "Клапан выпускает пар при 110 °C."
     },
     {
@@ -1462,6 +1470,7 @@
       "colors": ["#8fb6cc", "#9cc2d8", "#82a9bf"],
       "acid_resistance": 1.0,
       "emit": {"into": "liquid_nitrogen", "rate": 15, "temp": null},
+      "glow": false,
       "desc": "Дьюар с жидким азотом: двойные стенки с вакуумом между ними держат −196 °C."
     },
     {
@@ -1475,6 +1484,7 @@
       "colors": ["#050507", "#08080b", "#030304"],
       "acid_resistance": 1.0,
       "drain": {"rate": 60},
+      "glow": false,
       "desc": "Сток поглощает жидкости, порошки и газы — 60 клеток в секунду."
     },
     {
@@ -1822,7 +1832,7 @@
         "absorb": 0.03,
         "spontaneous": 0.02,
         "decay_heat": 0.0001,
-        "fission_energy": 3.0,
+        "fission_energy": 0.6,
         "neutrons_per_fission": [2, 3]
       },
       "wind_coupling": 0.0,
@@ -1845,7 +1855,7 @@
         "fast_fission": 2e-05,
         "absorb": 0.0002,
         "spontaneous": 0.0001,
-        "fission_energy": 3.0,
+        "fission_energy": 0.6,
         "neutrons_per_fission": [2, 3]
       },
       "wind_coupling": 1.0,
@@ -1929,6 +1939,83 @@
       "acid_resistance": 0.9,
       "wind_coupling": 0.6,
       "desc": "Сажа — почти чистый углерод от неполного сгорания, лёгкая и летучая."
+    },
+    {
+      "id": "uranium235_metal",
+      "name": "Уран-235 оружейный (металл)",
+      "category": "nuclear",
+      "state": "solid",
+      "density": 19050,
+      "conductivity": 27.5,
+      "heat_capacity": 116,
+      "colors": ["#c6e84a", "#d4f05e", "#b4d838", "#e0f57a"],
+      "melt": {"temp": 1132.2, "into": "corium", "latent": 35800},
+      "acid_resistance": 0.4,
+      "nuclear": {
+        "fissile": 0.9,
+        "fast_fission": 0.075,
+        "absorb": 0.01,
+        "spontaneous": 0.01,
+        "decay_heat": 0.0001,
+        "fission_energy": 0.6,
+        "neutrons_per_fission": [2, 3],
+        "burnup_into": "spent_fuel",
+        "burnup_chance": 5e-05,
+        "poison_into": "xenon135",
+        "poison_chance": 0.005
+      },
+      "desc": "Высокообогащённый металлический уран: голый шар в 52 кг (17 см) критичен без замедлителя."
+    },
+    {
+      "id": "molten_plutonium",
+      "name": "Жидкий плутоний",
+      "category": "nuclear",
+      "state": "liquid",
+      "density": 17145.5,
+      "conductivity": 7.0,
+      "heat_capacity": 140,
+      "thermal_expansion": 5e-05,
+      "initial_temp": 700.0,
+      "colors": ["#5ae8bd", "#6ef0c8", "#48d8ac"],
+      "viscosity": 0.4,
+      "freeze": {"temp": 639.4, "into": "plutonium239", "latent": 11800},
+      "acid_resistance": 0.5,
+      "nuclear": {
+        "fissile": 0.9,
+        "fast_fission": 0.087,
+        "absorb": 0.01,
+        "spontaneous": 0.4,
+        "decay_heat": 0.04,
+        "fission_energy": 0.62,
+        "neutrons_per_fission": [2, 4],
+        "burnup_into": "spent_fuel",
+        "burnup_chance": 5e-05,
+        "poison_into": "xenon135",
+        "poison_chance": 0.005
+      },
+      "desc": "Жидкий плутоний: у него самая высокая вязкость среди жидких металлов."
+    },
+    {
+      "id": "corium_solid",
+      "name": "Застывший кориум",
+      "category": "nuclear",
+      "state": "solid",
+      "density": 8500,
+      "conductivity": 2.0,
+      "heat_capacity": 500,
+      "colors": ["#5a4a3a", "#6a5644", "#4a3c30", "#7a6a3a"],
+      "melt": {"temp": 1100, "into": "corium", "latent": 274000},
+      "acid_resistance": 0.9,
+      "nuclear": {
+        "fissile": 0.15,
+        "fast_fission": 0.02,
+        "absorb": 0.1,
+        "spontaneous": 0.5,
+        "decay_heat": 5.0,
+        "fission_energy": 0.6,
+        "neutrons_per_fission": [2, 3]
+      },
+      "desc": "Застывший кориум: так в Чернобыле образовалась «слоновья нога» под реактором."
     }
   ]
 }

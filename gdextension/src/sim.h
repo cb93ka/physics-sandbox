@@ -46,6 +46,7 @@ struct Transition {
 	float temp = 0.0f;
 	int into = 0;
 	float latent = 0.0f; // J/kg
+	float energy = 0.0f; // J per cell: latent * max(mass of this cell, mass of the 'into' cell)
 };
 
 struct Nuclear {
@@ -96,6 +97,7 @@ struct Material {
 	float inv_C = 1; // 0 for fixed_temp (infinite capacity)
 	float inv_c = 1; // 1 / heat_capacity
 	float mass = 1; // kg per cell
+	float flame_temp = 900; // temperature of the flame (ignite.into) when initial_temp is missing
 };
 
 struct Reaction {
@@ -142,6 +144,7 @@ public:
 	std::vector<Reaction> reactions;
 	std::vector<int16_t> rx_table; // [a*256+b] = +(rule+1) (a is rule.a) or -(rule+1) (swapped)
 	float cell_size = 0.01f;
+	float solid_conduction_scale = 1.0f; // k multiplier for pairs where both cells are solid/powder
 	float ambient = 20.0f;
 	float thermal_time_scale = 1.0f;
 	float heat_multiplier = 1.0f;
@@ -193,6 +196,8 @@ public:
 
 	// helpers usable from the glue
 	void set_cell(int i, int m, float t);
+	void transmute(int i, int m); // keeps temperature and stored latent energy
+	float init_temp(int m) const { return std::isnan(mats[m].initial_temp) ? ambient : mats[m].initial_temp; }
 	void wake(int x, int y);
 	void wake_soft(int x, int y);
 	void wake_impl(int x, int y, bool hard);
@@ -235,7 +240,8 @@ private:
 
 	// air field internals
 	std::vector<float> au0, av0, ap, ap0, adiv, asrc, atemp0, ablur, atmp, afx, afy, awt;
-	std::vector<uint8_t> asolid, acount, atotal, afan;
+	std::vector<uint8_t> asolid, acount, atotal, afan, airN;
+	std::vector<float> airS, airT, airT2; // air-only block sums / means for heat transport
 	bool air_quiet = true;
 	void air_setup();
 	void air_step();
@@ -247,7 +253,7 @@ private:
 	bool tables_ready = false;
 	uint32_t base_rgba[256][32];
 	uint8_t thermal_lut[3400][3];
-	uint8_t bb_lut[3100][3];
+	uint8_t glow_lut[3100][4];
 	uint8_t flux_lut[1024];
 	uint8_t speed_lut[1024][4];
 
@@ -279,6 +285,7 @@ private:
 	void ignite_cell(int i);
 	void add_heat(int i, float joules);
 	void handle_phase(int i);
+	void radiation(float dt_th);
 	void fission_at(int i, int x, int y, const Material &M);
 	void emit_neutron(float x, float y, bool fast);
 

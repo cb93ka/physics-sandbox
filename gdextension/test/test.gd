@@ -40,6 +40,9 @@ func _init() -> void:
 	if only == "" or only == "nuke": test_nuclear()
 	if only == "" or only == "save": test_save()
 	if only == "" or only == "misc": test_misc()
+	if only == "" or only == "energy": test_energy()
+	if only == "" or only == "fire": test_fire_heat()
+	if only == "nuke2": test_nuke2()
 	if only == "" or only == "ice": test_ice()
 	if only == "" or only == "float": test_float()
 	if only == "" or only == "air": test_air()
@@ -558,3 +561,208 @@ func test_float() -> void:
 	print("wood (one block from the bottom, one dropped): rows %d..%d, cols %d..%d; ice dropped: rows %d..%d cols %d..%d; water surface row 40" % [wood.miny, wood.maxy, wood.minx, wood.maxx, ice.miny, ice.maxy, ice.minx, ice.maxx])
 	var ok: bool = wood.maxy < 50 and ice.maxy < 50 and ice.maxx - ice.minx == 2
 	print("RESULT movable_solid float ok=%s" % ok)
+
+
+# ---------------------------------------------------------------- v0.1.4: energy, latent, glow
+func test_energy() -> void:
+	print("\n== energy and latent heat ==")
+	# 1. conservation with the air field (hot air blob far from the edges; the edges leak to ambient)
+	for air_on in [true, false]:
+		w.setup(256, 180)
+		w.set_heat_multiplier(1.0)
+		w.set_air_enabled(air_on)
+		w.step_once()
+		var e0: float = w.get_total_energy()
+		w.heat_circle(Vector2i(128, 120), 10, 900.0, 1.0 / 60.0)
+		var e1: float = w.get_total_energy()
+		var line := "air field %s: injected %.2f J;" % ["on " if air_on else "off", e1 - e0]
+		var drift := 0.0
+		for t in [1, 10, 60]:
+			for i in t:
+				w.step_once()
+			var d: float = w.get_total_energy() - e1
+			line += " +%d steps: %+.3f J" % [t, d]
+			drift = d
+		print(line)
+		if air_on:
+			print("RESULT energy air_field drift=%.3f J of %.2f injected ok=%s" % [drift, e1 - e0, abs(drift) < 0.02 * (e1 - e0)])
+		w.set_air_enabled(true)
+	# 2. steam block in cold air lives and warms the air
+	w.setup(200, 120)
+	w.set_heat_multiplier(1.0)
+	for y in range(40, 50):
+		for x in range(90, 110):
+			w.paint_circle(Vector2i(x, y), 0, M.steam, 1)
+	var air0: float = w.get_mean_temp(0)
+	var s0: int = w.count_material(M.steam)
+	for i in 600:
+		w.step_once()
+	var s1: int = w.count_material(M.steam)
+	print("steam block 20x10 in 20 C air, 10 s (x1): steam %d -> %d, water %d, mean air %.3f -> %.3f C" % [s0, s1, w.count_material(M.water), air0, w.get_mean_temp(0)])
+	print("RESULT steam lives=%s air_warms=%s" % [s1 > s0 / 2, w.get_mean_temp(0) > air0 + 0.05])
+	# 3. big pot boils away noticeably (x3)
+	w.setup(320, 180)
+	w.set_heat_multiplier(3.0)
+	for y in range(170, 173):
+		for x in range(100, 161): w.paint_circle(Vector2i(x, y), 0, M.heater, 1)
+	for y in range(140, 170):
+		for x in [98, 99, 161, 162]: w.paint_circle(Vector2i(x, y), 0, M.steel, 1)
+	for y in range(168, 170):
+		for x in range(98, 163): w.paint_circle(Vector2i(x, y), 0, M.steel, 1)
+	for y in range(145, 168):
+		for x in range(100, 161): w.paint_circle(Vector2i(x, y), 0, M.water, 1)
+	var wn0: int = w.count_material(M.water)
+	var t_boil := -1.0
+	var wb := 0
+	for i in 60 * 120:
+		w.step_once()
+		if t_boil < 0 and w.count_material(M.steam) > 0:
+			t_boil = (i + 1) / 60.0
+			wb = w.count_material(M.water)
+		if t_boil > 0 and (i + 1) / 60.0 >= t_boil + 60.0:
+			break
+	var wn1: int = w.count_material(M.water)
+	var lost: float = 1.0 - float(wn1) / float(max(wb, 1))
+	print("pot 61x23 = %d water cells, x3: first steam %.1f s, 60 s later water %d -> %d (%.1f %% boiled off), steam %d" % [wn0, t_boil, wb, wn1, lost * 100.0, w.count_material(M.steam)])
+	print("RESULT pot1400 boiled=%.1f%% ok=%s" % [lost * 100.0, lost > 0.10])
+	w.set_heat_multiplier(1.0)
+	# 4. incandescence
+	w.setup(40, 20)
+	w.paint_circle(Vector2i(10, 10), 0, M.steel, 1)
+	w.paint_circle(Vector2i(30, 10), 0, M.steel, 1)
+	w.heat_circle(Vector2i(30, 10), 0, (1000.0 - 20.0) * 7850.0 * 490.0 * 1e-6, 1.0)
+	var cb: PackedByteArray = w.get_color_buffer(0)
+	var ic := (10 * 40 + 10) * 4
+	var ih := (10 * 40 + 30) * 4
+	print("steel 20 C rgb(%d,%d,%d) vs %.0f C rgb(%d,%d,%d)" % [cb[ic], cb[ic + 1], cb[ic + 2], w.get_cell(Vector2i(30, 10)).temp, cb[ih], cb[ih + 1], cb[ih + 2]])
+	print("RESULT glow ok=%s" % [cb[ih] > cb[ic] + 60 and cb[ih] > cb[ih + 2] + 80])
+
+
+func steel_mean(x0: int, x1: int, y0: int, y1: int) -> float:
+	var sum := 0.0; var n := 0
+	for y in range(y0, y1):
+		for x in range(x0, x1):
+			var c: Dictionary = w.get_cell(Vector2i(x, y))
+			if c.mat == M.steel:
+				sum += c.temp; n += 1
+	return sum / max(n, 1)
+
+func test_fire_heat() -> void:
+	print("\n== heating by flames, hot air and radiation (x1) ==")
+	# a. steel 10x3 on stone supports, a fire brush held under it (re-painted every frame)
+	for scene in ["fire brush", "burning wood", "heater 400 C", "lava pool"]:
+		w.setup(160, 90)
+		w.set_heat_multiplier(1.0)
+		for x in range(40, 120):
+			w.paint_circle(Vector2i(x, 89), 0, M.stone, 1)
+		for y in range(70, 89):
+			w.paint_circle(Vector2i(70, y), 0, M.stone, 1)
+			w.paint_circle(Vector2i(81, y), 0, M.stone, 1)
+		for y in range(67, 70):
+			for x in range(70, 82):
+				w.paint_circle(Vector2i(x, y), 0, M.steel, 1)
+		if scene == "burning wood":
+			for y in range(82, 89):
+				for x in range(72, 80): w.paint_circle(Vector2i(x, y), 0, M.wood, 1)
+			w.heat_circle(Vector2i(76, 86), 3, 3000.0, 1.0)
+		elif scene == "heater 400 C":
+			for y in range(86, 89):
+				for x in range(72, 80): w.paint_circle(Vector2i(x, y), 0, M.heater, 1)
+		elif scene == "lava pool" and M.has("lava"):
+			for y in range(84, 89):
+				for x in range(72, 80): w.paint_circle(Vector2i(x, y), 0, M.lava, 1)
+		var line := ""
+		for s in 6:
+			for i in 300:
+				if scene == "fire brush" and i % 2 == 0:
+					w.paint_circle(Vector2i(76, 84), 3, M.fire, 0)
+				w.step_once()
+			line += " %4.0f" % steel_mean(70, 82, 67, 70)
+		print("%-14s steel 10x3 mean T every 5 s:%s C" % [scene, line])
+	# b. radiation: hot steel block 10x5 at ~800 C, cold steel plate 10 cells above, air field off;
+	#    total energy must stay (no flames, no fixed cells, edges far away)
+	w.setup(160, 90)
+	w.set_heat_multiplier(1.0)
+	for y in range(50, 53):
+		for x in range(70, 90): w.paint_circle(Vector2i(x, y), 0, M.steel, 1)
+	for y in range(63, 68):
+		for x in range(75, 85):
+			w.paint_circle(Vector2i(x, y), 0, M.steel, 1)
+	w.set_air_enabled(false)
+	w.step_once()
+	var e0: float = w.get_total_energy()
+	for y in range(63, 68):
+		for x in range(75, 85):
+			w.heat_circle(Vector2i(x, y), 0, 780.0 * 7850.0 * 490.0 * 1e-6, 1.0)
+	var e1: float = w.get_total_energy()
+	var p0 := steel_mean(70, 90, 50, 53)
+	for i in 600: w.step_once()
+	var drift: float = w.get_total_energy() - e1
+	print("radiation: block 800 C -> plate 10 cells above: plate %.1f -> %.1f C in 10 s; energy drift %.2f J of %.0f J injected" % [p0, steel_mean(70, 90, 50, 53), drift, e1 - e0])
+	print("RESULT radiation ok=%s" % [steel_mean(70, 90, 50, 53) > p0 + 3.0 and abs(drift) < 0.01 * (e1 - e0)])
+	w.set_air_enabled(true)
+
+
+func pool(x0: int, y0: int, x1: int, y1: int) -> void:
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			var edge: bool = x == x0 or x == x1 or y == y1
+			w.paint_circle(Vector2i(x, y), 0, M.stone if edge else M.water, 1)
+
+func run_core(label: String, secs: int, every: int) -> void:
+	var line := ""
+	var t_steam := -1.0
+	var min_late := 1e9
+	for s in secs:
+		for i in 60:
+			w.step_once()
+		if t_steam < 0 and w.count_material(M.steam) > 0: t_steam = s + 1
+		var f: float = w.get_stats().fissions_per_sec
+		if s >= 10: min_late = min(min_late, f)
+		if (s + 1) % every == 0: line += " %d" % int(f)
+	print("%-32s fissions/s every %d s:%s | first steam %s s, water %d steam %d xenon %d spent %d maxT %.0f" % [label, every, line, str(t_steam), w.count_material(M.water), w.count_material(M.steam), w.count_material(M.get("xenon135", 0)), w.count_material(M.get("spent_fuel", 0)), w.get_stats().max_temp])
+	print("RESULT %s first_steam=%s min_fissions_after_10s=%d" % [label.replace(" ", "_"), str(t_steam), int(min_late)])
+
+func test_nuke2() -> void:
+	print("\n== reactors on data/materials.json (x1) ==")
+	# a. 8 strips of U-235 24x2 every 3 water cells
+	w.setup(200, 120); w.set_heat_multiplier(1.0)
+	pool(60, 40, 140, 119)
+	for k in 8:
+		var y := 60 + k * 5
+		for yy in range(y, y + 2):
+			for x in range(88, 112): w.paint_circle(Vector2i(x, yy), 0, M.uranium235, 1)
+	w.spawn_neutrons(Vector2i(100, 78), 4, 50)
+	run_core("lattice 8x(24x2) in water", 90, 10)
+	# b. block 20x20 of U-235 in water
+	w.setup(200, 120); w.set_heat_multiplier(1.0)
+	pool(60, 40, 140, 119)
+	for y in range(70, 90):
+		for x in range(90, 110): w.paint_circle(Vector2i(x, y), 0, M.uranium235, 1)
+	w.spawn_neutrons(Vector2i(100, 80), 4, 50)
+	run_core("block 20x20 in water", 60, 5)
+	# b2. QA-style lattice (U 3 / water 3, 36x30), 3 one-cell B4C rods into water gaps at 5 s
+	w.setup(200, 120); w.set_heat_multiplier(1.0)
+	pool(60, 40, 140, 119)
+	for y in range(70, 100):
+		for x in range(82, 118):
+			if ((x - 82) % 6) < 3: w.paint_circle(Vector2i(x, y), 0, M.uranium235, 1)
+	w.spawn_neutrons(Vector2i(100, 85), 6, 100)
+	for i in 300: w.step_once()
+	var before: float = w.get_stats().fissions_per_sec
+	for x in [86, 98, 110]:
+		for y in range(70, 100): w.paint_circle(Vector2i(x, y), 0, M.boron_carbide, 1)
+	for i in 180: w.step_once()
+	print("lattice 36x30 + 3 rods: fissions/s %d -> %d after 3 s, neutrons %d" % [int(before), int(w.get_stats().fissions_per_sec), w.get_stats().neutrons])
+	# c. bare metal
+	if M.has("uranium235_metal"):
+		for size in [12, 16]:
+			w.setup(120, 80); w.set_heat_multiplier(1.0)
+			for y in range(40 - size / 2, 40 + size / 2):
+				for x in range(60 - size / 2, 60 + size / 2): w.paint_circle(Vector2i(x, y), 0, M.uranium235_metal, 1)
+			w.spawn_neutrons(Vector2i(60, 40), 2, 30)
+			var line := ""
+			for s in 10:
+				for i in 30: w.step_once()
+				line += " %d" % int(w.get_stats().fissions_per_sec)
+			print("bare uranium235_metal %dx%d, fissions/s every 0.5 s:%s | neutrons %d" % [size, size, line, w.get_stats().neutrons])

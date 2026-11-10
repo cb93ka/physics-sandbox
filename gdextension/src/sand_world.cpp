@@ -149,6 +149,7 @@ void SandWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_thermal_time_scale", "s"), &SandWorld::set_thermal_time_scale);
 	ClassDB::bind_method(D_METHOD("count_material", "id"), &SandWorld::count_material);
 	ClassDB::bind_method(D_METHOD("get_mean_temp", "id"), &SandWorld::get_mean_temp);
+	ClassDB::bind_method(D_METHOD("get_total_energy"), &SandWorld::get_total_energy);
 }
 
 // ============================================================================
@@ -169,6 +170,7 @@ bool SandWorld::load_materials(const Dictionary &data) {
 	const float cell_size = (float)P.num(data, "cell_size_m", 0.01, "materials.json");
 	const float ambient = (float)P.num(data, "ambient_temp", 20.0, "materials.json");
 	const float tts = (float)P.num(data, "thermal_time_scale", 1.0, "materials.json");
+	const float scs = (float)P.num(data, "solid_conduction_scale", 1.0, "materials.json");
 
 	// pass 1: ids
 	for (int k = 0; k < arr.size(); k++) {
@@ -205,12 +207,12 @@ bool SandWorld::load_materials(const Dictionary &data) {
 		else P.fail(ctx + ": unknown state '" + to_std(st) + "'");
 		if (k == 0) M.state = sim::ST_EMPTY;
 		else if (M.state == sim::ST_EMPTY) P.fail(ctx + ": state 'empty' is reserved for air");
+		const bool gaslike = M.state == sim::ST_GAS || M.state == sim::ST_FIRE || M.state == sim::ST_EMPTY;
 
 		M.density = (float)P.num(d, "density", 1000, ctx, true);
 		M.conductivity = (float)P.num(d, "conductivity", 1, ctx, true);
 		M.heat_capacity = (float)P.num(d, "heat_capacity", 1000, ctx, true);
 		if (M.density <= 0 || M.heat_capacity <= 0 || M.conductivity < 0) P.fail(ctx + ": density/heat_capacity must be > 0");
-		const bool gaslike = M.state == sim::ST_GAS || M.state == sim::ST_FIRE || M.state == sim::ST_EMPTY;
 		M.expansion = (float)P.num(d, "thermal_expansion", gaslike ? 1.0 / 293.15 : 0.0, ctx);
 		M.initial_temp = d.has("initial_temp") && is_num(d["initial_temp"]) ? (float)(double)d["initial_temp"] : NAN;
 
@@ -235,7 +237,8 @@ bool SandWorld::load_materials(const Dictionary &data) {
 			P.fail(ctx + ": 'colors' must have 1..4 colours");
 			M.ncolors = 1;
 		}
-		M.glow = d.has("glow") && (bool)d["glow"];
+		// incandescence is on by default for everything that is not a gas; "glow": false forbids it
+		M.glow = d.has("glow") && d["glow"].get_type() != Variant::NIL ? (bool)d["glow"] : !gaslike;
 		M.hidden = d.has("hidden") && (bool)d["hidden"];
 		M.viscosity = std::min(1.0f, std::max(0.0f, (float)P.num(d, "viscosity", 0.0, ctx)));
 
@@ -366,6 +369,7 @@ bool SandWorld::load_materials(const Dictionary &data) {
 	w.cell_size = cell_size > 0 ? cell_size : 0.01f;
 	w.ambient = ambient;
 	w.thermal_time_scale = tts > 0 ? tts : 1.0f;
+	w.solid_conduction_scale = scs > 0 ? scs : 1.0f;
 	w.reactions.clear();
 	w.finalize_materials();
 	w.build_reaction_table();
@@ -578,13 +582,23 @@ double SandWorld::get_mean_temp(int id) const {
 	return n ? s / n : 0.0;
 }
 
+double SandWorld::get_total_energy() const {
+	double e = 0.0;
+	for (size_t i = 0; i < w.mat.size(); i++) {
+		const sim::Material &M = w.mats[w.mat[i]];
+		if (M.flags & sim::MF_FIXED) continue;
+		e += (double)M.cell_C * (w.temp[i] + 273.15) + w.phase[i];
+	}
+	return e;
+}
+
 // ============================================================================
 // save / load
 // ============================================================================
 
 namespace {
 const uint32_t SAVE_MAGIC = 0x57444E53; // "SNDW"
-const uint32_t SAVE_VERSION = 2; // v2 (0.1.1): + air field; v1 still loads
+const uint32_t SAVE_VERSION = 3; // v2: + air field; v3: phase buffer in J per cell (was J/kg)
 
 struct Writer {
 	std::vector<uint8_t> b;
@@ -695,7 +709,7 @@ bool SandWorld::load_bytes(const PackedByteArray &data) {
 		return false;
 	}
 	uint32_t ver = rd.u32();
-	if (ver != 1 && ver != 2) {
+	if (ver < 1 || ver > 3) {
 		UtilityFunctions::push_error("SandWorld.load_bytes: unsupported version ", (int64_t)ver);
 		return false;
 	}
@@ -739,6 +753,8 @@ bool SandWorld::load_bytes(const PackedByteArray &data) {
 	rd.raw(w.phase.data(), n * 4);
 	rd.raw(w.life.data(), n * 4);
 	for (auto &m : w.mat) m = remap[m];
+	if (ver < 3) // phase buffer was stored in J/kg
+		for (size_t i = 0; i < n; i++) w.phase[i] *= w.mats[w.mat[i]].mass;
 	for (size_t i = 0; i < n; i++) {
 		float &t = w.temp[i];
 		if (!std::isfinite(t)) t = amb;

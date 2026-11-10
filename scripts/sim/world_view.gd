@@ -104,6 +104,9 @@ func _process(delta: float) -> void:
 
 ## Забрать буфер цвета из ядра и обновить текстуру.
 func refresh(view_mode: int) -> void:
+	# Ядро могло пересоздать мир другого размера (load_bytes из чужого окна) — подстроиться.
+	if sim.get_width() != _img.get_width() or sim.get_height() != _img.get_height():
+		setup(sim)
 	var buf := sim.get_color_buffer(view_mode)
 	var w := _img.get_width()
 	var h := _img.get_height()

@@ -77,8 +77,11 @@ static func build_palette(world: SimWorld) -> Array[Dictionary]:
 		var info := world.get_material_info(i)
 		if info.is_empty():
 			continue
-		var raw_id: Variant = info.get("id", i)
-		var key := str(raw_id) if raw_id is String or raw_id is StringName else str(info.get("name", i))
+		# Ключ — строковый id материала (str_id у ядра; у старой заглушки id строкой).
+		var key := str(info.get("str_id", ""))
+		if key == "":
+			var raw_id: Variant = info.get("id", i)
+			key = str(raw_id) if raw_id is String or raw_id is StringName else str(info.get("name", i))
 		var col: Color = Color.MAGENTA
 		var c: Variant = info.get("color", Color.MAGENTA)
 		if c is Color:

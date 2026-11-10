@@ -76,6 +76,15 @@ def check_materials(doc):
         return {}, {}
     if doc["cell_size_m"] <= 0 or doc["thermal_time_scale"] <= 0:
         err("cell_size_m и thermal_time_scale должны быть > 0")
+    if "solid_conduction_scale" in doc:
+        v = doc["solid_conduction_scale"]
+        if not is_num(v) or v <= 0:
+            err("solid_conduction_scale должен быть числом > 0")
+    top = {"version", "cell_size_m", "ambient_temp", "thermal_time_scale", "solid_conduction_scale",
+           "categories", "materials"}
+    for key in doc:
+        if key not in top:
+            err(f"materials.json: неизвестное поле верхнего уровня '{key}'")
     ambient = doc["ambient_temp"]
 
     cats = set()

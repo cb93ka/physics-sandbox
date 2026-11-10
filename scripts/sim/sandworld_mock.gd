@@ -170,7 +170,7 @@ func get_material_info(id: int) -> Dictionary:
 	if id < 0 or id >= _ids.size():
 		return {}
 	return {
-		"id": _ids[id], "name": _names[id], "category": _cats[id], "state": _state_names[id],
+		"id": id, "str_id": _ids[id], "name": _names[id], "category": _cats[id], "state": _state_names[id],
 		"desc": _descs[id], "color": _first_color[id], "hidden": _hidden[id] != 0,
 	}
 

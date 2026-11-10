@@ -39,7 +39,7 @@ void World::fission_at(int i, int x, int y, const Material &M) {
 		}
 	}
 	if (N.burnup_into >= 0 && frand() < N.burnup_chance) {
-		set_cell(i, N.burnup_into, temp[i]);
+		transmute(i, N.burnup_into);
 		wake(x, y);
 	}
 }

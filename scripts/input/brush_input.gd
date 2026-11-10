@@ -8,6 +8,8 @@ extends Node
 signal undo_requested
 signal step_requested
 signal clear_requested
+## Мир восстановлен из снимка (размер мог поменяться).
+signal world_reloaded
 
 const HEAT_WATTS := 900.0
 const NEUTRONS_PER_SEC := 400.0
@@ -16,6 +18,8 @@ const TWO_FINGER_TAP_MS := 300
 const TWO_FINGER_TAP_MOVE := 14.0
 const CANCEL_STROKE_MS := 220
 const ZOOM_STEP := 1.15
+const HEAT_MIN_RADIUS := 3     # нагрев/охлаждение: при меньшей кисти почти ничего не греется
+const THERMO_HOLD_MS := 3000   # термометр держит показания после отпускания пальца
 const WIND_MAX := 120.0       # клеток/с
 const WIND_GAIN := 1.0
 
@@ -38,9 +42,11 @@ var _stroke_erase := false
 var _stroke_touch := false
 var _stroke_index := -1
 var _stroke_t0 := 0
+var _stroke_snap := false
 var _last_cell := Vector2i.ZERO
 var _finger_pos := Vector2.ZERO
 var _neutron_acc := 0.0
+var _thermo_hold_until := 0
 var _wind_prev := Vector2.ZERO
 var _wind_vel := Vector2.ZERO
 
@@ -133,7 +139,7 @@ func _on_key(k: InputEventKey) -> void:
 	if not k.pressed or k.echo:
 		return
 	var handled := true
-	if k.keycode == KEY_Z and k.is_command_or_control_pressed():
+	if k.keycode == KEY_Z and (k.ctrl_pressed or k.meta_pressed):
 		undo_requested.emit()
 	elif k.keycode == KEY_F:
 		step_requested.emit()
@@ -152,7 +158,7 @@ func _on_key(k: InputEventKey) -> void:
 	elif k.keycode == KEY_4 or k.keycode == KEY_KP_4:
 		state.view = 3
 		state.notify()
-	elif k.keycode == KEY_C and not k.is_command_or_control_pressed():
+	elif k.keycode == KEY_C and not (k.ctrl_pressed or k.meta_pressed):
 		clear_requested.emit()
 	else:
 		handled = false
@@ -172,7 +178,7 @@ func _on_mouse_button(mb: InputEventMouseButton) -> void:
 			if not mb.pressed:
 				return
 			var up := mb.button_index == MOUSE_BUTTON_WHEEL_UP
-			if mb.is_command_or_control_pressed():
+			if mb.ctrl_pressed or mb.meta_pressed:
 				view.zoom_at(mb.position, ZOOM_STEP if up else 1.0 / ZOOM_STEP)
 			else:
 				state.set_radius(state.brush_radius + (1 if up else -1))
@@ -223,6 +229,7 @@ func _notification(what: int) -> void:
 
 func _on_touch(t: InputEventScreenTouch) -> void:
 	if t.pressed:
+		_thermo_hold_until = 0
 		if _touches.is_empty():
 			_suppress_touch = false
 		_touches[t.index] = t.position
@@ -253,6 +260,8 @@ func _on_touch(t: InputEventScreenTouch) -> void:
 		_end_stroke()
 	if _touches.is_empty():
 		_suppress_touch = false
+		if not was_gesture:
+			_thermo_hold_until = Time.get_ticks_msec() + THERMO_HOLD_MS
 		pointer_valid = false
 
 
@@ -299,16 +308,33 @@ func _two_points() -> Array[Vector2]:
 # Штрих
 # =========================================================================
 
+## Смещение над пальцем — только для кисти и ластика: они рисуют, и важно видеть край.
+## Нагрев, охлаждение, нейтроны и ветер действуют прямо под пальцем (вокруг — прицел).
+func _uses_offset(from_touch: bool) -> bool:
+	return from_touch and state.brush_offset and (_stroke_erase or state.tool == AppState.Tool.BRUSH
+		or state.tool == AppState.Tool.ERASER)
+
+
 func _brush_point(screen_p: Vector2, from_touch: bool) -> Vector2:
-	if from_touch and state.brush_offset:
+	if _uses_offset(from_touch):
 		return screen_p + Vector2(0, -FINGER_OFFSET)
 	return screen_p
 
 
+## Радиус воздействия в клетках (для нагрева/охлаждения не меньше HEAT_MIN_RADIUS).
+func effect_radius() -> int:
+	if not _stroke_erase and (state.tool == AppState.Tool.HEAT or state.tool == AppState.Tool.COOL):
+		return maxi(state.brush_radius, HEAT_MIN_RADIUS)
+	return state.brush_radius
+
+
 func _begin_stroke(screen_p: Vector2, erase: bool, from_touch: bool, index: int) -> void:
-	undo.push(sim.save_bytes())
 	_stroke = true
 	_stroke_erase = erase or state.tool == AppState.Tool.ERASER
+	# Снимок для отмены — только когда штрих меняет материал (кисть, ластик).
+	_stroke_snap = _stroke_erase or state.tool == AppState.Tool.BRUSH
+	if _stroke_snap:
+		undo.push(sim.save_bytes())
 	_stroke_touch = from_touch
 	_stroke_index = index
 	_stroke_t0 = Time.get_ticks_msec()
@@ -342,9 +368,11 @@ func _end_stroke() -> void:
 func _cancel_stroke() -> void:
 	_stroke = false
 	_stroke_index = -1
+	if not _stroke_snap:
+		return
 	var snap := undo.pop()
-	if not snap.is_empty():
-		sim.load_bytes(snap)
+	if not snap.is_empty() and sim.load_bytes(snap):
+		world_reloaded.emit()
 
 
 func _paint_mode() -> int:
@@ -372,9 +400,9 @@ func _apply_continuous(delta: float) -> void:
 		AppState.Tool.BRUSH:
 			sim.paint_circle(c, r, state.material, _paint_mode())
 		AppState.Tool.HEAT:
-			sim.heat_circle(c, r, HEAT_WATTS, delta)
+			sim.heat_circle(c, effect_radius(), HEAT_WATTS, delta)
 		AppState.Tool.COOL:
-			sim.heat_circle(c, r, -HEAT_WATTS, delta)
+			sim.heat_circle(c, effect_radius(), -HEAT_WATTS, delta)
 		AppState.Tool.WIND:
 			_apply_wind(delta)
 		AppState.Tool.NEUTRON:
@@ -409,7 +437,7 @@ func _update_cursor() -> void:
 	if not pointer_valid or _gesture:
 		cursor.visible = false
 		return
-	var r_px := (float(state.brush_radius) + 0.5) * view.cell_scale()
+	var r_px := (float(effect_radius()) + 0.5) * view.cell_scale()
 	var col := Color(1, 1, 1, 0.85)
 	if _stroke_erase or state.tool == AppState.Tool.ERASER:
 		col = Color(1.0, 0.45, 0.45, 0.9)
@@ -421,11 +449,13 @@ func _update_cursor() -> void:
 		col = Color(0.6, 1.0, 1.0, 0.9)
 	elif state.tool == AppState.Tool.WIND:
 		col = Color(0.75, 0.95, 1.0, 0.9)
-	cursor.set_cursor(pointer_pos, r_px, col, _finger_pos, _stroke and _stroke_touch and state.brush_offset)
+	var touching := _stroke and _stroke_touch
+	cursor.set_cursor(pointer_pos, r_px, col, _finger_pos, touching and _uses_offset(true),
+		touching and not _uses_offset(true))
 
 
 ## Клетка под кистью (для термометра) или (−1, −1).
 func pointer_cell() -> Vector2i:
-	if not pointer_valid:
+	if not pointer_valid and Time.get_ticks_msec() > _thermo_hold_until:
 		return Vector2i(-1, -1)
 	return view.screen_to_cell(pointer_pos)

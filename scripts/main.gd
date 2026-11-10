@@ -13,12 +13,16 @@ extends Node
 ##   --demo-tab=<id категории>    открыть вкладку шторки (например special)
 ##   --ui-scale=<k>               масштаб интерфейса (на телефоне считается сам)
 ##   --safe-sim                   изобразить вырез iPhone (отступы безопасной зоны)
+##   --demo-material=<str_id>     выбрать материал в демо (uranium235 — покажет подсказку)
+##   --force-banner               показать баннер «ядро не загрузилось» (проверка вёрстки)
 ##   --mock                       принудительно GDScript-заглушка ядра
 ##   --touch-debug                мышь рисует через эмулированный тач (проверка жестов)
 
 const GRID_HEIGHT := 180
 const UNDO_LIMIT := 20
 const HAPTIC_JUMP := 400.0
+const INFO_PERIOD := 0.15
+const NUCLEAR_HINT := "Уран делится от нейтронов.\nДля цепной реакции нужен замедлитель — вода или графит —\nи достаточно топлива."
 
 var state := AppState.new()
 var sim: SimWorld
@@ -46,6 +50,9 @@ var _haptic_cooldown := 0.0
 var _gravity_sent := Vector2(0, 1)
 var _settings_dirty := false
 var _settings_timer := 0.0
+var _info_timer := 0.0
+var _info_cell := Vector2i(-2, -2)
+var _nuclear_hint_shown := false
 
 
 func _ready() -> void:
@@ -131,6 +138,10 @@ func _ready() -> void:
 	input.undo_requested.connect(_undo)
 	input.step_requested.connect(_step)
 	input.clear_requested.connect(hud.confirm_clear)
+	input.world_reloaded.connect(_on_world_reloaded)
+	if (sim.core_failed and not OS.has_feature("editor")) or _args.has("force-banner"):
+		hud.show_core_banner("Ядро физики не загрузилось (ОС: %s) — работает упрощённый режим" % OS.get_name(),
+			"Ядро не загрузилось (%s) — упрощённый режим" % OS.get_name())
 	state.changed.connect(_on_state_changed)
 	if _args.has("demo-heat3"):
 		state.fast_heat = true
@@ -147,7 +158,13 @@ func _process(delta: float) -> void:
 	if not state.paused:
 		sim.step(delta)
 	world_view.refresh(state.view)
-	_update_info()
+	_info_timer -= delta
+	# Сменилась клетка под курсором — сразу; иначе раз в INFO_PERIOD.
+	var pc := input.pointer_cell()
+	if _info_timer <= 0.0 or pc != _info_cell:
+		_info_cell = pc
+		_info_timer = INFO_PERIOD
+		_update_info()
 	_update_tilt()
 	if _settings_dirty:
 		_settings_timer -= delta
@@ -174,6 +191,11 @@ func _on_state_changed() -> void:
 		sim.set_gravity(_gravity_sent)
 	if tracers != null:
 		tracers.set_active(state.view == 3)
+	if not _nuclear_hint_shown and hud != null:
+		var e := hud.drawer.entry_for(state.material)
+		if str(e.get("category", "")) == "nuclear":
+			_nuclear_hint_shown = true
+			hud.show_toast(NUCLEAR_HINT)
 	hud.sync()
 	_settings_dirty = true
 	_settings_timer = 1.0
@@ -183,7 +205,8 @@ func _undo() -> void:
 	var snap := undo.pop()
 	if snap.is_empty():
 		return
-	sim.load_bytes(snap)
+	if sim.load_bytes(snap):
+		_on_world_reloaded()
 
 
 func _step() -> void:
@@ -210,6 +233,15 @@ func _load_slot(slot: int) -> void:
 	if not sim.load_bytes(data):
 		undo.pop()
 		push_warning("Слот %d не читается этим ядром" % slot)
+		return
+	_on_world_reloaded()
+
+
+## После load_bytes ядро могло пересоздать мир под размер из сохранения
+## (ширина зависит от окна, где сохраняли): пересобрать рендер, камеру, трассеры.
+func _on_world_reloaded() -> void:
+	world_view.setup(sim)
+	tracers.reset()
 
 
 # =========================================================================
@@ -367,6 +399,9 @@ func _demo_build(w: int, h: int) -> void:
 	for k: String in ["uranium235", "boron_carbide", "graphite", "steel", "water", "sand"]:
 		state.push_recent(k)
 	state.notify()
+	if _args.has("demo-material") and sim.find_material(str(_args["demo-material"])) > 0:
+		state.material = sim.find_material(str(_args["demo-material"]))
+		state.notify()
 	if _args.has("demo-tab"):
 		hud.drawer.select_tab(str(_args["demo-tab"]))
 	var wall := _mat("wall") if _mat("wall") > 0 else _mat("stone")

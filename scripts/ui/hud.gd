@@ -28,6 +28,10 @@ var _stats_label: Label
 var _hint: PanelContainer
 var _hint_label: Label
 var _safe_extra := Rect2()
+var _banner: PanelContainer
+var _toast: PanelContainer
+var _toast_label: Label
+var _toast_timer := 0.0
 
 
 func setup(app_state: AppState, palette: Array[Dictionary], categories: Array[Dictionary]) -> void:
@@ -93,6 +97,10 @@ func setup(app_state: AppState, palette: Array[Dictionary], categories: Array[Di
 	_hint.add_child(_hint_label)
 	add_child(_hint)
 
+	_toast = _make_note(Color(0.10, 0.13, 0.20, 0.95), Color(0.35, 0.62, 1.0))
+	_toast_label = _toast.get_child(0) as Label
+	add_child(_toast)
+
 	modal = Modal.new()
 	add_child(modal)
 
@@ -152,12 +160,83 @@ func blocks_point(p: Vector2) -> bool:
 
 
 func set_cell_info(text: String) -> void:
+	if text == _thermo_label.text and _thermo.visible == (text != ""):
+		return
 	_thermo.visible = text != ""
 	_thermo_label.text = text
+	_relayout_right()
 
 
 func set_stats_text(text: String) -> void:
+	if text == _stats_label.text:
+		return
 	_stats_label.text = text
+	_relayout_right()
+
+
+## Красный баннер «ядро не загрузилось» вверху, под полосой.
+## short — вариант для узкого экрана.
+func show_core_banner(text: String, short: String = "") -> void:
+	if _banner == null:
+		_banner = _make_note(Color(0.55, 0.08, 0.08, 0.95), Color(1.0, 0.45, 0.4))
+		add_child(_banner)
+		move_child(_banner, modal.get_index())
+	_banner.set_meta("long", text)
+	_banner.set_meta("short", short if short != "" else text)
+	(_banner.get_child(0) as Label).text = text
+	_banner.visible = true
+	_place_notes.call_deferred()
+
+
+## Короткая плашка над шторкой, гаснет сама (не модальная). Переносы строк — в тексте.
+func show_toast(text: String, seconds: float = 8.0) -> void:
+	_toast_label.text = text
+	_toast.visible = true
+	_toast_timer = seconds
+	_place_notes.call_deferred()
+
+
+func _make_note(bg: Color, border: Color) -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = border
+	sb.set_border_width_all(2)
+	sb.content_margin_left = 12
+	sb.content_margin_right = 12
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	p.add_theme_stylebox_override("panel", sb)
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.visible = false
+	p.top_level = true
+	var l := UiKit.label("")
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	p.add_child(l)
+	return p
+
+
+## Плашки — по центру свободной полосы между колонкой инструментов и правой колонкой.
+func _place_notes() -> void:
+	if top_bar == null or drawer == null:
+		return
+	var vp := get_viewport().get_visible_rect().size
+	var x0 := tool_bar.get_global_rect().end.x + 8.0
+	var x1 := vp.x - 8.0
+	if _right.visible and _right.get_combined_minimum_size().x > 0.0:
+		x1 = _right.get_global_rect().position.x - 8.0
+	if _banner != null and _banner.visible:
+		var l := _banner.get_child(0) as Label
+		l.text = str(_banner.get_meta("long"))
+		if _banner.get_combined_minimum_size().x > x1 - x0:
+			l.text = str(_banner.get_meta("short"))
+		_banner.reset_size()
+		var sz := _banner.get_combined_minimum_size()
+		_banner.position = Vector2(x0 + maxf(0.0, (x1 - x0 - sz.x) * 0.5), top_bar.get_global_rect().end.y + 8.0)
+	if _toast != null and _toast.visible:
+		_toast.reset_size()
+		var tz := _toast.get_combined_minimum_size()
+		_toast.position = Vector2(x0 + maxf(0.0, (x1 - x0 - tz.x) * 0.5), drawer.get_global_rect().position.y - tz.y - 10.0)
 
 
 func show_hint(text: String, anchor: Rect2) -> void:
@@ -218,16 +297,25 @@ func world_area() -> Rect2:
 
 func _on_middle_resized() -> void:
 	world_area_changed.emit(world_area())
+	_relayout_right()
+	_place_notes()
 	tool_bar.fit_height(_middle.size.y)
 	tool_bar.position = Vector2.ZERO
 	_right.position = Vector2(_middle.size.x - _right.size.x, 0)
 
 
-func _process(_delta: float) -> void:
-	# Правая колонка меняет ширину вместе с текстом — держим её у правого края.
-	if _right.size.x > 0.0:
-		_right.position.x = _middle.size.x - _right.get_combined_minimum_size().x
-		_right.size.x = _right.get_combined_minimum_size().x
+func _process(delta: float) -> void:
+	if _toast_timer > 0.0:
+		_toast_timer -= delta
+		if _toast_timer <= 0.0:
+			_toast.visible = false
+
+
+## Правая колонка меняет ширину вместе с текстом — держим её у правого края.
+func _relayout_right() -> void:
+	var w := _right.get_combined_minimum_size().x
+	_right.size.x = w
+	_right.position.x = _middle.size.x - w
 
 
 func _input(event: InputEvent) -> void:

@@ -8,6 +8,8 @@ var is_native := false
 ## Ядро умеет поле воздуха (v0.1.1). Без него вид «Воздух» работает без трассеров.
 var has_air := false
 var has_air_layer := false
+## Ядро должно было быть, но не загрузилось (не редактор, не --mock).
+var core_failed := false
 var _w: Variant
 
 
@@ -18,6 +20,9 @@ func _init(force_mock: bool = false) -> void:
 	else:
 		push_warning("SandWorld (GDExtension) не найден — работает медленная заглушка SandWorldMock")
 		_w = SandWorldMock.new()
+		if not force_mock:
+			core_failed = true
+			print("Physics: ядро не загружено")
 	var obj := _w as Object
 	has_air = obj.has_method("get_air_velocity") and obj.has_method("get_air_grid_size")
 	has_air_layer = obj.has_method("get_air_layer")

@@ -66,6 +66,7 @@ public:
 	void set_thermal_time_scale(double s) { w.thermal_time_scale = (float)s; }
 	int count_material(int id) const;
 	double get_mean_temp(int id) const;
+	double get_total_energy() const; // sum of C*T + stored latent over non-fixed cells, J
 };
 
 } // namespace godot
