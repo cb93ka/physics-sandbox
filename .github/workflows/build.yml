@@ -63,9 +63,25 @@ jobs:
           restore-keys: |
             scons-linux-x86_64-release-${{ steps.cppkey.outputs.sha }}-
 
-      - name: Собрать GDExtension (template_release)
-        working-directory: gdextension
-        run: scons platform=linux target=template_release arch=x86_64 -j"$(nproc)"
+      # Собираем в manylinux_2_28 (glibc 2.28, как требует сам Godot), иначе .so с GLIBC_2.38
+      # молча не загрузится на Ubuntu 22.04 / Debian 12 и игра уйдёт в заглушку.
+      - name: Собрать GDExtension (template_release, manylinux_2_28)
+        run: |
+          docker run --rm -v "$PWD":/w -w /w/gdextension \
+            -e SCONS_CACHE=/w/.scons-cache -e SCONS_VERSION \
+            quay.io/pypa/manylinux_2_28_x86_64 bash -euc '
+              PY=/opt/python/cp312-cp312/bin
+              $PY/pip install -q "scons==$SCONS_VERSION"
+              $PY/scons platform=linux target=template_release arch=x86_64 -j"$(nproc)"
+              chown -R '"$(id -u):$(id -g)"' /w/bin /w/.scons-cache /w/gdextension'
+          python3 - <<'PY'
+          import re, subprocess
+          out = subprocess.run(["objdump", "-T", "bin/linux/libphysics.linux.template_release.x86_64.so"],
+                               capture_output=True, text=True, check=True).stdout
+          vers = sorted({tuple(map(int, v.split("."))) for v in re.findall(r"GLIBC_(\d+\.\d+)", out)})
+          print("max GLIBC:", vers[-1])
+          assert vers[-1] <= (2, 28), f"GLIBC {vers[-1]} > 2.28"
+          PY
 
       - name: Проверить выход сборки
         run: |
@@ -115,6 +131,11 @@ jobs:
           godot --headless --export-release "Linux" build/linux/Physics.x86_64
           chmod +x build/linux/Physics.x86_64
           ls -la build/linux
+
+      - name: Дымовой тест Linux (ядро загружается)
+        run: |
+          ./build/linux/Physics.x86_64 --headless --quit-after 120 2>&1 | tee smoke.log
+          grep -q "ядро: SandWorld" smoke.log || { echo "::error::ядро физики не загрузилось в Linux-сборке"; exit 1; }
 
       - name: Упаковать
         id: pack
@@ -235,6 +256,17 @@ jobs:
           godot --headless --export-release "Windows" build/windows/Physics.exe
           ls -la build/windows
           test -f build/windows/Physics.exe
+
+      # Physics.exe — оконное приложение без консоли, поэтому вывод берём из --log-file.
+      - name: Дымовой тест Windows (ядро загружается)
+        shell: pwsh
+        run: |
+          $log = Join-Path $PWD "smoke.log"
+          $p = Start-Process -FilePath "build/windows/Physics.exe" -ArgumentList "--headless","--quit-after","120","--log-file","`"$log`"" -Wait -PassThru -NoNewWindow
+          Get-Content $log -Encoding utf8
+          if (-not (Select-String -Path $log -Pattern "ядро: SandWorld" -Encoding utf8 -Quiet)) {
+            Write-Output "::error::ядро физики не загрузилось в Windows-сборке"; exit 1
+          }
 
       - name: Упаковать
         id: pack
